@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from speedreader.engine import DEFAULT_WPM, ReadingEngine
 from speedreader.importers.clipboard import ClipboardImporter
+from speedreader.orp import format_word_with_orp
 from speedreader.importers.file import FileImporter
 from speedreader.importers.markdown import MarkdownImporter
 
@@ -102,7 +103,7 @@ class MainWindow(QMainWindow):
         if not text.strip():
             self._stop_playback()
             self._engine.load([])
-            self._word_label.setText("Clipboard is empty")
+            self._set_plain_message("Clipboard is empty")
             self._update_status()
             self._play_button.setEnabled(False)
             self._reset_button.setEnabled(False)
@@ -127,7 +128,7 @@ class MainWindow(QMainWindow):
         self._stop_playback()
         self._engine.load(segments)
         if self._engine.is_empty:
-            self._word_label.setText("No readable text found")
+            self._set_plain_message("No readable text found")
             self._play_button.setEnabled(False)
             self._reset_button.setEnabled(False)
         else:
@@ -180,7 +181,7 @@ class MainWindow(QMainWindow):
         self._stop_playback()
         self._engine.advance()
         if self._engine.is_finished:
-            self._word_label.setText("Done")
+            self._set_plain_message("Done")
         else:
             self._show_current_word()
         self._update_status()
@@ -190,7 +191,7 @@ class MainWindow(QMainWindow):
         self._update_status()
         if self._engine.is_finished:
             self._stop_playback()
-            self._word_label.setText("Done")
+            self._set_plain_message("Done")
             return
         self._show_current_word()
         self._timer.setInterval(self._engine.interval_ms())
@@ -202,9 +203,17 @@ class MainWindow(QMainWindow):
         if self._playing:
             self._timer.setInterval(self._engine.interval_ms())
 
+    def _set_plain_message(self, message: str) -> None:
+        self._word_label.setTextFormat(Qt.TextFormat.PlainText)
+        self._word_label.setText(message)
+
     def _show_current_word(self) -> None:
         word = self._engine.current_word
-        self._word_label.setText(word if word is not None else "Done")
+        if word is None:
+            self._set_plain_message("Done")
+            return
+        self._word_label.setTextFormat(Qt.TextFormat.RichText)
+        self._word_label.setText(format_word_with_orp(word))
 
     def _update_status(self) -> None:
         total = self._engine.word_count

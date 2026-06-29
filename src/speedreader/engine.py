@@ -10,6 +10,18 @@ from speedreader.domain import TextSegment
 
 _WORD_PATTERN = re.compile(r"\S+")
 
+_PUNCTUATION_PAUSE_MULTIPLIERS = {
+    ".": 2.5,
+    "!": 2.5,
+    "?": 2.5,
+    ",": 1.5,
+    ";": 1.5,
+    ":": 1.5,
+    "…": 2.0,
+}
+_ELLIPSIS_PAUSE_MULTIPLIER = 2.0
+_TRAILING_WRAPPERS = "\"')]}>"
+
 
 @dataclass(frozen=True)
 class WordToken:
@@ -90,8 +102,22 @@ class ReadingEngine:
         return self.current_word
 
     def interval_ms(self) -> int:
-        """Milliseconds to wait between words at the current WPM."""
-        return int(60_000 / self._wpm)
+        """Milliseconds to display the current word at the current WPM."""
+        base = int(60_000 / self._wpm)
+        word = self.current_word
+        if word is None:
+            return base
+        return int(base * punctuation_pause_multiplier(word))
+
+
+def punctuation_pause_multiplier(word: str) -> float:
+    """Return a delay multiplier based on trailing punctuation."""
+    stripped = word.rstrip(_TRAILING_WRAPPERS)
+    if not stripped:
+        return 1.0
+    if stripped.endswith("..."):
+        return _ELLIPSIS_PAUSE_MULTIPLIER
+    return _PUNCTUATION_PAUSE_MULTIPLIERS.get(stripped[-1], 1.0)
 
 
 def tokenize_segments(segments: List[TextSegment]) -> List[WordToken]:

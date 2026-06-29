@@ -3,7 +3,7 @@
 import pytest
 
 from speedreader import ReadingEngine, SegmentKind, TextSegment
-from speedreader.engine import tokenize_segments
+from speedreader.engine import punctuation_pause_multiplier, tokenize_segments
 
 
 @pytest.fixture
@@ -68,6 +68,24 @@ def test_interval_ms_respects_wpm(engine: ReadingEngine) -> None:
     assert engine.interval_ms() == 150
     engine.wpm = 600
     assert engine.interval_ms() == 100
+
+
+def test_punctuation_pause_multiplier() -> None:
+    assert punctuation_pause_multiplier("word") == 1.0
+    assert punctuation_pause_multiplier("wait,") == 1.5
+    assert punctuation_pause_multiplier("Done.") == 2.5
+    assert punctuation_pause_multiplier("Really?") == 2.5
+    assert punctuation_pause_multiplier("wait...") == 2.0
+
+
+def test_interval_ms_applies_punctuation_pause(engine: ReadingEngine) -> None:
+    engine.wpm = 300
+    engine.load([TextSegment(content="Next, stop.", kind=SegmentKind.PARAGRAPH)])
+    assert engine.current_word == "Next,"
+    assert engine.interval_ms() == 300
+    engine.advance()
+    assert engine.current_word == "stop."
+    assert engine.interval_ms() == 500
 
 
 def test_empty_load(engine: ReadingEngine) -> None:
