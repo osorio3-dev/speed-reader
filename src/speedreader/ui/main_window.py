@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont, QKeySequence, QShortcut
+from PySide6.QtGui import QCloseEvent, QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -15,11 +15,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from speedreader.engine import DEFAULT_WPM, ReadingEngine
+from speedreader.engine import ReadingEngine
 from speedreader.importers.clipboard import ClipboardImporter
 from speedreader.orp import format_word_with_orp
 from speedreader.importers.file import FileImporter
 from speedreader.importers.markdown import MarkdownImporter
+from speedreader.settings import MAX_WPM, MIN_WPM, SettingsStore
 
 
 class MainWindow(QMainWindow):
@@ -30,7 +31,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Speedreader")
         self.resize(720, 360)
 
-        self._engine = ReadingEngine()
+        self._settings = SettingsStore()
+        self._engine = ReadingEngine(wpm=self._settings.load_wpm())
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._on_tick)
         self._playing = False
@@ -42,7 +44,7 @@ class MainWindow(QMainWindow):
         word_font.setBold(True)
         self._word_label.setFont(word_font)
 
-        self._status_label = QLabel(f"0 / 0 words · {DEFAULT_WPM} WPM")
+        self._status_label = QLabel(f"0 / 0 words · {self._engine.wpm} WPM")
         self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self._paste_button = QPushButton("Paste")
@@ -60,7 +62,7 @@ class MainWindow(QMainWindow):
         self._reset_button.setEnabled(False)
 
         self._wpm_slider = QSlider(Qt.Orientation.Horizontal)
-        self._wpm_slider.setRange(100, 1000)
+        self._wpm_slider.setRange(MIN_WPM, MAX_WPM)
         self._wpm_slider.setValue(self._engine.wpm)
         self._wpm_slider.setTickInterval(100)
         self._wpm_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
@@ -77,17 +79,26 @@ class MainWindow(QMainWindow):
         controls.addWidget(self._wpm_label)
         controls.addWidget(self._wpm_slider)
 
+        self._controls = QWidget()
+        self._controls.setLayout(controls)
+
         layout = QVBoxLayout()
         layout.addStretch()
         layout.addWidget(self._word_label)
         layout.addWidget(self._status_label)
         layout.addStretch()
-        layout.addLayout(controls)
+        layout.addWidget(self._controls)
 
         container = QWidget()
         container.setLayout(layout)
         self.setCentralWidget(container)
+        self._normal_word_point_size = self._word_label.font().pointSize()
+        self._focus_word_point_size = 56
         self._setup_shortcuts()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self._settings.save_wpm(self._engine.wpm)
+        super().closeEvent(event)
 
     def _setup_shortcuts(self) -> None:
         QShortcut(QKeySequence.StandardKey.Open, self, self._open_file)
@@ -96,6 +107,32 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence(Qt.Key.Key_Left), self, self._previous_word)
         QShortcut(QKeySequence(Qt.Key.Key_Right), self, self._next_word)
         QShortcut(QKeySequence(Qt.Key.Key_R), self, self._reset_reading)
+        QShortcut(QKeySequence(Qt.Key.Key_F11), self, self._toggle_fullscreen)
+        QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self._exit_fullscreen)
+
+    def _toggle_fullscreen(self) -> None:
+        if self.isFullScreen():
+            self._exit_fullscreen()
+        else:
+            self._enter_fullscreen()
+
+    def _enter_fullscreen(self) -> None:
+        self._status_label.hide()
+        self._controls.hide()
+        word_font = self._word_label.font()
+        word_font.setPointSize(self._focus_word_point_size)
+        self._word_label.setFont(word_font)
+        self.showFullScreen()
+
+    def _exit_fullscreen(self) -> None:
+        if not self.isFullScreen():
+            return
+        self.showNormal()
+        self._status_label.show()
+        self._controls.show()
+        word_font = self._word_label.font()
+        word_font.setPointSize(self._normal_word_point_size)
+        self._word_label.setFont(word_font)
 
     def _paste_from_clipboard(self) -> None:
         clipboard = ClipboardImporter()
@@ -199,6 +236,7 @@ class MainWindow(QMainWindow):
     def _on_wpm_changed(self, value: int) -> None:
         self._engine.wpm = value
         self._wpm_label.setText(f"{value} WPM")
+        self._settings.save_wpm(value)
         self._update_status()
         if self._playing:
             self._timer.setInterval(self._engine.interval_ms())
