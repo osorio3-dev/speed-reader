@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent, QFont, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from speedreader.engine import ReadingEngine
+from speedreader.domain import SegmentKind
 from speedreader.importers.clipboard import ClipboardImporter
 from speedreader.orp import format_word_with_orp
 from speedreader.importers.file import FileImporter, is_supported_file
@@ -28,7 +30,19 @@ from speedreader.settings import (
     SettingsStore,
 )
 from speedreader.paths import app_icon_path
+from speedreader.profiles import READING_PROFILES
+from speedreader.speech.base import SpeechBackend
+from speedreader.speech.factory import create_speech_backend
+from speedreader.speech.voices import (
+    QT_VOICE_ID,
+    list_installed_piper_voices,
+    resolve_voice_selection,
+    voice_label,
+)
 from speedreader.ui.shortcuts_dialog import ShortcutsDialog
+
+IDLE_MESSAGE = "-- Speedreader --"
+IDLE_HINT = "Pega, abre (Ctrl+O) o arrastra un .txt / .md"
 
 
 class MainWindow(QMainWindow):
@@ -41,15 +55,29 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
 
         self._settings = SettingsStore()
-        self._engine = ReadingEngine(wpm=self._settings.load_wpm())
+        self._engine = ReadingEngine(
+            wpm=self._settings.load_wpm(),
+            profile_id=self._settings.load_reading_profile(),
+        )
         self._normal_word_point_size = self._settings.load_font_size()
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._on_tick)
+        self._phrase_timer = QTimer(self)
+        self._phrase_timer.timeout.connect(self._on_phrase_visual_tick)
+        self._phrase_word_offset = 0
         self._playing = False
         self._source_path: str | None = None
         self._source_kind: str | None = None
+        self._voices_dir = self._settings.load_voices_dir()
+        self._selected_voice_id = resolve_voice_selection(
+            self._voices_dir,
+            self._settings.load_tts_voice(),
+        )
+        self._speech = self._create_speech_backend()
+        self._apply_speech_rate()
+        self._tts_enabled = self._settings.load_tts_enabled()
 
-        self._word_label = QLabel("Paste, open, or drop a file to begin")
+        self._word_label = QLabel(IDLE_MESSAGE)
         self._word_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._apply_word_font_size(self._normal_word_point_size)
 
@@ -74,6 +102,17 @@ class MainWindow(QMainWindow):
         self._reset_button.clicked.connect(self._reset_reading)
         self._reset_button.setEnabled(False)
 
+        self._tts_button = QPushButton("TTS")
+        self._tts_button.setCheckable(True)
+        self._tts_button.setChecked(self._tts_enabled)
+        self._tts_button.setToolTip(f"Speech: {self._speech.name}")
+        self._tts_button.toggled.connect(self._on_tts_toggled)
+
+        self._voice_combo = QComboBox()
+        self._voice_combo.setMinimumWidth(220)
+        self._voice_combo.currentIndexChanged.connect(self._on_voice_changed)
+        self._refresh_voice_combo()
+
         self._wpm_slider = QSlider(Qt.Orientation.Horizontal)
         self._wpm_slider.setRange(MIN_WPM, MAX_WPM)
         self._wpm_slider.setValue(self._engine.wpm)
@@ -82,6 +121,14 @@ class MainWindow(QMainWindow):
         self._wpm_slider.valueChanged.connect(self._on_wpm_changed)
 
         self._wpm_label = QLabel(f"{self._engine.wpm} WPM")
+
+        self._profile_combo = QComboBox()
+        for profile in READING_PROFILES.values():
+            self._profile_combo.addItem(profile.label, profile.id)
+        profile_index = self._profile_combo.findData(self._engine.profile_id)
+        if profile_index >= 0:
+            self._profile_combo.setCurrentIndex(profile_index)
+        self._profile_combo.currentIndexChanged.connect(self._on_profile_changed)
 
         self._font_slider = QSlider(Qt.Orientation.Horizontal)
         self._font_slider.setRange(MIN_FONT_SIZE, MAX_FONT_SIZE)
@@ -97,6 +144,8 @@ class MainWindow(QMainWindow):
         controls.addWidget(self._paste_button)
         controls.addWidget(self._play_button)
         controls.addWidget(self._reset_button)
+        controls.addWidget(self._tts_button)
+        controls.addWidget(self._voice_combo)
         controls.addStretch()
 
         tuning = QVBoxLayout()
@@ -106,8 +155,12 @@ class MainWindow(QMainWindow):
         wpm_row = QHBoxLayout()
         wpm_row.addWidget(self._wpm_label)
         wpm_row.addWidget(self._wpm_slider)
+        profile_row = QHBoxLayout()
+        profile_row.addWidget(QLabel("Perfil"))
+        profile_row.addWidget(self._profile_combo)
         tuning.addLayout(font_row)
         tuning.addLayout(wpm_row)
+        tuning.addLayout(profile_row)
         controls.addLayout(tuning)
 
         self._controls = QWidget()
@@ -129,12 +182,118 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(QIcon(str(icon_path)))
         self._setup_shortcuts()
         self._restore_reading_session()
+        if self._engine.is_empty:
+            self._show_idle_message()
+
+    def _show_idle_message(self) -> None:
+        self._set_plain_message(IDLE_MESSAGE)
+        self._update_status()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._settings.save_wpm(self._engine.wpm)
         self._settings.save_font_size(self._normal_word_point_size)
+        self._settings.save_tts_enabled(self._tts_enabled)
+        self._settings.save_tts_voice(self._selected_voice_id)
+        self._settings.save_reading_profile(self._engine.profile_id)
         self._persist_reading_session()
+        self._speech.stop()
         super().closeEvent(event)
+
+    def _create_speech_backend(self) -> SpeechBackend:
+        preference = "qt" if self._selected_voice_id == QT_VOICE_ID else "auto"
+        backend = create_speech_backend(
+            preference=preference,  # type: ignore[arg-type]
+            voices_dir=self._voices_dir,
+            voice_id=self._selected_voice_id,
+        )
+        backend.set_finished_callback(self._on_speech_finished)
+        return backend
+
+    def _apply_speech_rate(self) -> None:
+        self._speech.set_rate_from_wpm(
+            self._engine.wpm,
+            self._engine.speech_pace_multiplier(),
+        )
+
+    def _on_profile_changed(self, index: int) -> None:
+        if index < 0:
+            return
+        profile_id = self._profile_combo.itemData(index)
+        if not profile_id or profile_id == self._engine.profile_id:
+            return
+        self._engine.set_profile(str(profile_id))
+        self._settings.save_reading_profile(self._engine.profile_id)
+        self._apply_speech_rate()
+        self._update_status()
+        if self._playing and self._tts_enabled:
+            self._phrase_timer.setInterval(
+                self._engine.interval_ms_at(self._display_position())
+            )
+        elif self._playing and not self._tts_enabled:
+            self._timer.setInterval(self._engine.interval_ms())
+
+    def _refresh_voice_combo(self) -> None:
+        installed = list_installed_piper_voices(self._voices_dir)
+        self._selected_voice_id = resolve_voice_selection(
+            self._voices_dir,
+            self._selected_voice_id,
+            installed=installed,
+        )
+
+        self._voice_combo.blockSignals(True)
+        self._voice_combo.clear()
+        for voice_id in installed:
+            self._voice_combo.addItem(voice_label(voice_id), voice_id)
+        self._voice_combo.addItem(voice_label(QT_VOICE_ID), QT_VOICE_ID)
+
+        index = self._voice_combo.findData(self._selected_voice_id)
+        if index < 0:
+            index = self._voice_combo.findData(QT_VOICE_ID)
+        self._voice_combo.setCurrentIndex(max(index, 0))
+        self._voice_combo.blockSignals(False)
+
+        self._selected_voice_id = str(self._voice_combo.currentData())
+        self._tts_button.setToolTip(f"Voz: {self._speech.name}")
+
+    def _reload_speech_backend(self) -> None:
+        was_playing = self._playing
+        self._speech.stop()
+        self._speech = self._create_speech_backend()
+        self._apply_speech_rate()
+        self._tts_button.setToolTip(f"Voz: {self._speech.name}")
+        self._show_reading_position()
+        self._update_status()
+        if was_playing and self._tts_enabled and not self._engine.is_finished:
+            self._speak_current()
+
+    def _on_voice_changed(self, index: int) -> None:
+        if index < 0:
+            return
+        voice_id = self._voice_combo.itemData(index)
+        if not voice_id or voice_id == self._selected_voice_id:
+            return
+
+        self._selected_voice_id = str(voice_id)
+        self._settings.save_tts_voice(self._selected_voice_id)
+        self._reload_speech_backend()
+
+    def _on_tts_toggled(self, enabled: bool) -> None:
+        self._tts_enabled = enabled
+        self._settings.save_tts_enabled(enabled)
+        if not enabled:
+            self._speech.stop()
+            if self._playing and not self._engine.is_finished:
+                self._timer.start(self._engine.interval_ms())
+            self._show_reading_position()
+            return
+        self._apply_speech_rate()
+        self._show_reading_position()
+        if self._playing:
+            self._timer.stop()
+            self._speak_current()
+
+    def _uses_phrase_tts(self) -> bool:
+        return self._tts_enabled and self._speech.name.startswith("Piper")
 
     def _setup_shortcuts(self) -> None:
         QShortcut(QKeySequence.StandardKey.Open, self, self._open_file)
@@ -194,7 +353,7 @@ class MainWindow(QMainWindow):
         if not text.strip():
             self._stop_playback()
             self._engine.load([])
-            self._set_plain_message("Clipboard is empty")
+            self._show_idle_message()
             self._update_status()
             self._play_button.setEnabled(False)
             self._reset_button.setEnabled(False)
@@ -246,7 +405,7 @@ class MainWindow(QMainWindow):
                 self._engine.seek(resume_position)
             else:
                 self._engine.reset()
-            self._show_current_word()
+            self._show_reading_position()
             self._play_button.setEnabled(True)
             self._reset_button.setEnabled(True)
         self._sync_progress_slider()
@@ -297,55 +456,151 @@ class MainWindow(QMainWindow):
             self._engine.reset()
         self._playing = True
         self._play_button.setText("Pause")
-        self._timer.start(self._engine.interval_ms())
-        self._show_current_word()
+        if self._tts_enabled:
+            self._speak_current()
+        else:
+            self._timer.start(self._engine.interval_ms())
+            self._show_reading_position()
 
     def _stop_playback(self) -> None:
         self._playing = False
         self._timer.stop()
+        self._stop_phrase_visual_timer()
+        self._speech.stop()
         self._play_button.setText("Play")
+
+    def _stop_phrase_visual_timer(self) -> None:
+        self._phrase_timer.stop()
+        self._phrase_word_offset = 0
+
+    def _display_position(self) -> int:
+        if self._phrase_timer.isActive():
+            return self._engine.position + self._phrase_word_offset
+        return self._engine.position
+
+    def _should_skip_tts_for_current_unit(self) -> bool:
+        return self._engine.current_segment_kind == SegmentKind.CODE_BLOCK
+
+    def _speak_current(self) -> None:
+        if self._uses_phrase_tts():
+            self._speak_current_phrase()
+        else:
+            self._speak_current_word()
+
+    def _speak_current_word(self) -> None:
+        if not self._playing:
+            return
+        if self._engine.is_finished:
+            self._stop_playback()
+            self._set_plain_message("Done")
+            return
+        self._show_current_word()
+        if self._should_skip_tts_for_current_unit():
+            self._on_speech_finished()
+            return
+        word = self._engine.current_word
+        if not word:
+            self._on_speech_finished()
+            return
+        self._apply_speech_rate()
+        self._speech.speak(word)
+
+    def _speak_current_phrase(self) -> None:
+        if not self._playing:
+            return
+        if self._engine.is_finished:
+            self._stop_playback()
+            self._set_plain_message("Done")
+            return
+        if self._should_skip_tts_for_current_unit():
+            self._on_speech_finished()
+            return
+        phrase = self._engine.current_phrase_text()
+        if not phrase:
+            self._on_speech_finished()
+            return
+        self._phrase_word_offset = 0
+        self._show_phrase_word_at_offset(0)
+        self._apply_speech_rate()
+        self._speech.speak(phrase)
+        self._phrase_timer.start(self._engine.interval_ms_at(self._engine.position))
+
+    def _on_phrase_visual_tick(self) -> None:
+        phrase_end = self._engine.phrase_end_position()
+        next_index = self._engine.position + self._phrase_word_offset + 1
+        if next_index >= phrase_end:
+            self._phrase_timer.stop()
+            return
+        self._phrase_word_offset += 1
+        self._show_phrase_word_at_offset(self._phrase_word_offset)
+        self._update_status()
+        self._phrase_timer.setInterval(self._engine.interval_ms_at(next_index))
+
+    def _on_speech_finished(self) -> None:
+        if not self._playing or not self._tts_enabled:
+            return
+        self._stop_phrase_visual_timer()
+        if self._uses_phrase_tts():
+            self._engine.advance_phrase()
+        else:
+            self._engine.advance()
+        self._update_status()
+        if self._engine.is_finished:
+            self._stop_playback()
+            self._set_plain_message("Done")
+            return
+        self._speak_current()
 
     def _reset_reading(self) -> None:
         self._stop_playback()
         self._engine.reset()
-        self._show_current_word()
+        self._show_reading_position()
         self._update_status()
 
     def _previous_word(self) -> None:
         if self._engine.is_empty:
             return
         self._stop_playback()
-        self._engine.retreat()
-        self._show_current_word()
+        if self._uses_phrase_tts():
+            self._engine.retreat_phrase()
+        else:
+            self._engine.retreat()
+        self._show_reading_position()
         self._update_status()
 
     def _next_word(self) -> None:
         if self._engine.is_empty or self._engine.is_finished:
             return
         self._stop_playback()
-        self._engine.advance()
+        if self._uses_phrase_tts():
+            self._engine.advance_to_next_phrase()
+        else:
+            self._engine.advance()
         if self._engine.is_finished:
             self._set_plain_message("Done")
         else:
-            self._show_current_word()
+            self._show_reading_position()
         self._update_status()
 
     def _on_tick(self) -> None:
+        if self._tts_enabled:
+            return
         self._engine.advance()
         self._update_status()
         if self._engine.is_finished:
             self._stop_playback()
             self._set_plain_message("Done")
             return
-        self._show_current_word()
+        self._show_reading_position()
         self._timer.setInterval(self._engine.interval_ms())
 
     def _on_wpm_changed(self, value: int) -> None:
         self._engine.wpm = value
         self._wpm_label.setText(f"{value} WPM")
         self._settings.save_wpm(value)
+        self._apply_speech_rate()
         self._update_status()
-        if self._playing:
+        if self._playing and not self._tts_enabled:
             self._timer.setInterval(self._engine.interval_ms())
 
     def _on_font_size_changed(self, value: int) -> None:
@@ -370,7 +625,33 @@ class MainWindow(QMainWindow):
         self._word_label.setTextFormat(Qt.TextFormat.PlainText)
         self._word_label.setText(message)
 
+    def _show_reading_position(self) -> None:
+        if self._uses_phrase_tts() and self._phrase_timer.isActive():
+            self._show_phrase_word_at_offset(self._phrase_word_offset)
+        elif self._uses_phrase_tts():
+            self._show_current_phrase()
+        else:
+            self._show_current_word()
+
+    def _show_phrase_word_at_offset(self, offset: int) -> None:
+        token = self._engine.token_at(self._engine.position + offset)
+        if token is None:
+            self._set_plain_message("Done")
+            return
+        self._word_label.setWordWrap(False)
+        self._word_label.setTextFormat(Qt.TextFormat.RichText)
+        self._word_label.setText(format_word_with_orp(token.text))
+
+    def _show_current_phrase(self) -> None:
+        phrase = self._engine.current_phrase_text()
+        if phrase is None:
+            self._set_plain_message("Done")
+            return
+        self._word_label.setWordWrap(True)
+        self._set_plain_message(phrase)
+
     def _show_current_word(self) -> None:
+        self._word_label.setWordWrap(False)
         word = self._engine.current_word
         if word is None:
             self._set_plain_message("Done")
@@ -383,7 +664,7 @@ class MainWindow(QMainWindow):
             return
         self._stop_playback()
         self._engine.seek(value)
-        self._show_current_word()
+        self._show_reading_position()
         self._update_status()
 
     def _sync_progress_slider(self) -> None:
@@ -397,16 +678,33 @@ class MainWindow(QMainWindow):
         elif self._engine.is_finished:
             self._progress_slider.setValue(maximum)
         else:
-            self._progress_slider.setValue(self._engine.position)
+            self._progress_slider.setValue(self._display_position())
         self._progress_slider.blockSignals(False)
 
     def _update_status(self) -> None:
+        if self._engine.is_empty:
+            self._status_label.setText(f"{IDLE_HINT} · {self._mode_summary()}")
+            self._sync_progress_slider()
+            return
+
         total = self._engine.word_count
-        current = min(self._engine.position + (0 if self._engine.is_finished else 1), total)
+        current = min(self._display_position() + (0 if self._engine.is_finished else 1), total)
         if total == 0:
             current = 0
         self._status_label.setText(
-            f"{current} / {total} words · {self._engine.wpm} WPM"
+            f"{current} / {total} words · {self._engine.wpm} WPM · {self._mode_summary()}"
         )
         if not self._progress_slider.isSliderDown():
             self._sync_progress_slider()
+
+    def _mode_summary(self) -> str:
+        parts = [self._settings.load_reading_profile_label()]
+        if self._tts_enabled:
+            parts.append(self._speech.name)
+            if self._uses_phrase_tts():
+                parts.append("frases + RSVP")
+            else:
+                parts.append("palabras")
+        else:
+            parts.append("RSVP")
+        return " · ".join(parts)

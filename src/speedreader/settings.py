@@ -9,6 +9,8 @@ from typing import Optional
 from PySide6.QtCore import QSettings
 
 from speedreader.engine import DEFAULT_WPM
+from speedreader.profiles import DEFAULT_PROFILE_ID, normalize_profile_id, profile_label
+from speedreader.speech.voices import DEFAULT_PIPER_VOICE, QT_VOICE_ID
 
 MIN_WPM = 100
 MAX_WPM = 1000
@@ -21,6 +23,12 @@ _SESSION_SOURCE_KIND_KEY = "session/source_kind"
 _SESSION_SOURCE_PATH_KEY = "session/source_path"
 _SESSION_POSITION_KEY = "session/position"
 _FILE_SOURCE_KIND = "file"
+_TTS_ENABLED_KEY = "tts/enabled"
+_TTS_BACKEND_KEY = "tts/backend"
+_TTS_VOICES_DIR_KEY = "tts/voices_dir"
+_TTS_VOICE_KEY = "tts/voice"
+_READING_PROFILE_KEY = "reading/profile"
+DEFAULT_VOICES_DIR = Path.home() / ".local" / "share" / "speedreader" / "voices"
 
 
 @dataclass(frozen=True)
@@ -70,6 +78,62 @@ class SettingsStore:
     def save_font_size(self, size: int) -> None:
         """Persist the RSVP font size."""
         self._settings.setValue(_FONT_SIZE_KEY, clamp_font_size(size))
+
+    def load_tts_enabled(self, default: bool = False) -> bool:
+        """Return whether TTS-driven reading is enabled."""
+        value = self._settings.value(_TTS_ENABLED_KEY, default)
+        if isinstance(value, str):
+            return value.lower() in {"1", "true", "yes"}
+        return bool(value)
+
+    def save_tts_enabled(self, enabled: bool) -> None:
+        """Persist the TTS enabled flag."""
+        self._settings.setValue(_TTS_ENABLED_KEY, enabled)
+
+    def load_tts_backend(self, default: str = "auto") -> str:
+        """Return preferred TTS backend: auto, piper, or qt."""
+        value = str(self._settings.value(_TTS_BACKEND_KEY, default))
+        if value in {"auto", "piper", "qt"}:
+            return value
+        return default
+
+    def save_tts_backend(self, backend: str) -> None:
+        """Persist the preferred TTS backend."""
+        if backend not in {"auto", "piper", "qt"}:
+            backend = "auto"
+        self._settings.setValue(_TTS_BACKEND_KEY, backend)
+
+    def load_voices_dir(self) -> Path:
+        """Return the directory containing Piper voice models."""
+        value = self._settings.value(_TTS_VOICES_DIR_KEY, str(DEFAULT_VOICES_DIR))
+        return Path(str(value))
+
+    def save_voices_dir(self, voices_dir: Path) -> None:
+        """Persist the Piper voices directory."""
+        self._settings.setValue(_TTS_VOICES_DIR_KEY, str(voices_dir))
+
+    def load_tts_voice(self, default: str = DEFAULT_PIPER_VOICE) -> str:
+        """Return the selected TTS voice id (Piper name or ``qt``)."""
+        value = str(self._settings.value(_TTS_VOICE_KEY, default))
+        if value == QT_VOICE_ID:
+            return QT_VOICE_ID
+        return value
+
+    def save_tts_voice(self, voice_id: str) -> None:
+        """Persist the selected TTS voice id."""
+        self._settings.setValue(_TTS_VOICE_KEY, voice_id)
+
+    def load_reading_profile(self, default: str = DEFAULT_PROFILE_ID) -> str:
+        """Return the saved reading profile id."""
+        return normalize_profile_id(str(self._settings.value(_READING_PROFILE_KEY, default)))
+
+    def save_reading_profile(self, profile_id: str) -> None:
+        """Persist the reading profile id."""
+        self._settings.setValue(_READING_PROFILE_KEY, normalize_profile_id(profile_id))
+
+    def load_reading_profile_label(self) -> str:
+        """Return the display label for the saved reading profile."""
+        return profile_label(self.load_reading_profile())
 
     def load_reading_session(self) -> Optional[ReadingSession]:
         """Return the last saved file session if it is still valid."""

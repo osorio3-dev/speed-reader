@@ -15,6 +15,7 @@ _SHORTCUTS_HTML = """
   <tr><td><b>Esc</b></td><td>Salir de pantalla completa</td></tr>
   <tr><td><b>?</b></td><td>Mostrar esta ayuda</td></tr>
 </table>
+<p>Activa <b>TTS</b> para que la voz marque el ritmo. Con <b>Piper</b> se lee frase a frase con RSVP sincronizado; con Qt, palabra a palabra. El perfil ajusta el ritmo en títulos, párrafos y código.</p>
 <p>Arrastra un archivo <code>.txt</code> o <code>.md</code> a la ventana para abrirlo.</p>
 """
 

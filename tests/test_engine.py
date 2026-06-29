@@ -128,3 +128,67 @@ def test_empty_load(engine: ReadingEngine) -> None:
     assert engine.is_empty
     assert engine.current_word is None
     assert engine.advance() is None
+
+
+def test_phrase_end_index_splits_on_sentence_end(engine: ReadingEngine) -> None:
+    engine.load(
+        [
+            TextSegment(
+                content="Hola mundo. Otro párrafo aquí.",
+                kind=SegmentKind.PARAGRAPH,
+            )
+        ]
+    )
+    assert engine.current_phrase_text() == "Hola mundo."
+    engine.advance_phrase()
+    assert engine.current_phrase_text() == "Otro párrafo aquí."
+
+
+def test_phrase_end_index_splits_on_paragraph_change(engine: ReadingEngine) -> None:
+    engine.load(
+        [
+            TextSegment(content="Primera línea", kind=SegmentKind.PARAGRAPH),
+            TextSegment(content="Segunda línea", kind=SegmentKind.PARAGRAPH),
+        ]
+    )
+    assert engine.current_phrase_text() == "Primera línea"
+    engine.advance_phrase()
+    assert engine.current_phrase_text() == "Segunda línea"
+
+
+def test_phrase_end_index_treats_code_block_as_one_unit(engine: ReadingEngine) -> None:
+    engine.load(
+        [
+            TextSegment(content="Antes.", kind=SegmentKind.PARAGRAPH),
+            TextSegment(content="print(x)\nprint(y)", kind=SegmentKind.CODE_BLOCK),
+            TextSegment(content="Después.", kind=SegmentKind.PARAGRAPH),
+        ]
+    )
+    engine.advance_phrase()
+    assert engine.current_phrase_text() == "print(x) print(y)"
+    engine.advance_phrase()
+    assert engine.current_phrase_text() == "Después."
+
+
+def test_retreat_phrase_moves_to_previous_sentence(engine: ReadingEngine) -> None:
+    engine.load(
+        [TextSegment(content="Uno dos. Tres cuatro.", kind=SegmentKind.PARAGRAPH)]
+    )
+    engine.advance_to_next_phrase()
+    assert engine.current_word == "Tres"
+    engine.retreat_phrase()
+    assert engine.current_word == "Uno"
+
+
+def test_interval_ms_at_uses_profile_multiplier(engine: ReadingEngine) -> None:
+    engine.load([TextSegment(content="Title", kind=SegmentKind.HEADING)])
+    normal = engine.interval_ms_at(0)
+    engine.set_profile("study")
+    study = engine.interval_ms_at(0)
+    assert study > normal
+
+
+def test_speech_pace_multiplier_uses_profile(engine: ReadingEngine) -> None:
+    engine.load([TextSegment(content="Title", kind=SegmentKind.HEADING)])
+    engine.set_profile("study")
+    assert engine.speech_pace_multiplier(0) > 1.0

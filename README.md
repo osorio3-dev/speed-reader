@@ -96,9 +96,39 @@ rm ~/.local/share/icons/hicolor/256x256/apps/speedreader.png
 | `Esc` | Salir de pantalla completa |
 | `?` | Mostrar atajos de teclado |
 
+Con **TTS + Piper**: lectura por frases, RSVP sincronizado palabra a palabra, y `←`/`→` saltan frases.
+
 Arrastra un archivo `.txt` o `.md` a la ventana para abrirlo.
 
 En pantalla completa se ocultan controles y progreso; la palabra se muestra más grande.
+
+## TTS offline (opcional)
+
+Instala el extra de voz neural:
+
+```bash
+uv sync --extra tts
+./scripts/download-voice.sh
+```
+
+Por defecto descarga `es_MX-ald-x_low` (~20 MB, voz latina ligera). Otras opciones:
+
+```bash
+./scripts/download-voice.sh es_MX-claude-high
+./scripts/download-voice.sh --list
+```
+
+En la app, el desplegable junto a **TTS** permite elegir entre voces Piper instaladas o **Qt / eSpeak**.
+
+Sin Piper, el botón **TTS** usa `QTextToSpeech` (eSpeak) en español si el sistema lo ofrece:
+
+```bash
+sudo apt install speech-dispatcher espeak-ng
+```
+
+Con **TTS** activo, la voz marca el ritmo. Con **Piper** se lee frase a frase con RSVP sincronizado; con Qt/eSpeak, palabra a palabra. El perfil **Normal / Estudio / Técnico** ajusta la velocidad visual y de voz según títulos, párrafos y código.
+
+Los bloques de código se omiten en TTS. El WPM controla la velocidad base.
 
 ## Desarrollo
 
@@ -111,8 +141,10 @@ uv run pytest
 ```
 src/speedreader/
   engine.py      # Motor RSVP, WPM, pausas por puntuación
+  profiles.py    # Perfiles de ritmo visual y TTS
   orp.py         # Punto de reconocimiento óptimo
   settings.py    # Preferencias persistentes
+  speech/        # TTS offline (Piper + Qt)
   importers/     # Plain text, Markdown, clipboard, archivos
   ui/            # Ventana PySide6
 ```

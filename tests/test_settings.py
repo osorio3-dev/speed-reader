@@ -77,3 +77,25 @@ def test_clear_reading_session(tmp_path) -> None:
     store.save_reading_session(str(file_path), 1)
     store.clear_reading_session()
     assert store.load_reading_session() is None
+
+
+def test_settings_store_roundtrips_tts_voice(tmp_path) -> None:
+    ini_path = tmp_path / "speedreader.ini"
+    settings = QSettings(str(ini_path), QSettings.Format.IniFormat)
+    store = SettingsStore(settings)
+
+    store.save_tts_voice("es_MX-claude-high")
+    assert store.load_tts_voice() == "es_MX-claude-high"
+
+    store.save_tts_voice("qt")
+    assert store.load_tts_voice() == "qt"
+
+
+def test_settings_store_roundtrips_reading_profile(tmp_path) -> None:
+    ini_path = tmp_path / "speedreader.ini"
+    settings = QSettings(str(ini_path), QSettings.Format.IniFormat)
+    store = SettingsStore(settings)
+
+    store.save_reading_profile("study")
+    assert store.load_reading_profile() == "study"
+    assert store.load_reading_profile_label() == "Estudio"
