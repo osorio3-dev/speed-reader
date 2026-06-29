@@ -92,3 +92,26 @@ code block
         SegmentKind.BLOCKQUOTE,
     ]
     assert segments[1].content == "This is important and emphasized."
+
+
+def test_thematic_break_does_not_crash(importer: MarkdownImporter) -> None:
+    segments = importer.parse("Intro text\n\n---\n\nAfter the rule")
+    assert len(segments) == 2
+    assert segments[0].content == "Intro text"
+    assert segments[1].content == "After the rule"
+
+
+def test_table_rows(importer: MarkdownImporter) -> None:
+    source = "| Name | Value |\n| --- | --- |\n| One | 1 |"
+    segments = importer.parse(source)
+    assert len(segments) == 2
+    assert segments[0].content == "Name | Value"
+    assert segments[1].content == "One | 1"
+
+
+def test_setext_heading(importer: MarkdownImporter) -> None:
+    segments = importer.parse("Main title\n==========\n\nBody")
+    assert segments[0] == TextSegment(
+        content="Main title", kind=SegmentKind.HEADING, level=1
+    )
+    assert segments[1].content == "Body"

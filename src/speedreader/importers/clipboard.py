@@ -29,11 +29,15 @@ class ClipboardImporter:
 
     def read(self) -> List[TextSegment]:
         """Return TextSegments from the current clipboard text."""
-        clipboard = self._clipboard or self._default_clipboard()
-        text = clipboard.text()
+        text = self.read_text()
         if not text:
             return []
         return self._text_importer.parse(text)
+
+    def read_text(self) -> str:
+        """Return the raw clipboard text."""
+        clipboard = self._clipboard or self._default_clipboard()
+        return clipboard.text()
 
     def _default_clipboard(self) -> _ClipboardLike:
         from PySide6.QtWidgets import QApplication

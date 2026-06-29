@@ -1,0 +1,162 @@
+"""Main application window for RSVP speed reading."""
+
+from __future__ import annotations
+
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QPushButton,
+    QSlider,
+    QVBoxLayout,
+    QWidget,
+)
+
+from speedreader.engine import DEFAULT_WPM, ReadingEngine
+from speedreader.importers.clipboard import ClipboardImporter
+from speedreader.importers.markdown import MarkdownImporter
+
+
+class MainWindow(QMainWindow):
+    """RSVP reader with paste, play/pause, and WPM controls."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle("Speedreader")
+        self.resize(720, 360)
+
+        self._engine = ReadingEngine()
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._on_tick)
+        self._playing = False
+
+        self._word_label = QLabel("Paste text to begin")
+        self._word_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        word_font = QFont()
+        word_font.setPointSize(42)
+        word_font.setBold(True)
+        self._word_label.setFont(word_font)
+
+        self._status_label = QLabel(f"0 / 0 words · {DEFAULT_WPM} WPM")
+        self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self._paste_button = QPushButton("Paste")
+        self._paste_button.clicked.connect(self._paste_from_clipboard)
+
+        self._play_button = QPushButton("Play")
+        self._play_button.clicked.connect(self._toggle_playback)
+        self._play_button.setEnabled(False)
+
+        self._reset_button = QPushButton("Reset")
+        self._reset_button.clicked.connect(self._reset_reading)
+        self._reset_button.setEnabled(False)
+
+        self._wpm_slider = QSlider(Qt.Orientation.Horizontal)
+        self._wpm_slider.setRange(100, 1000)
+        self._wpm_slider.setValue(self._engine.wpm)
+        self._wpm_slider.setTickInterval(100)
+        self._wpm_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self._wpm_slider.valueChanged.connect(self._on_wpm_changed)
+
+        self._wpm_label = QLabel(f"{self._engine.wpm} WPM")
+
+        controls = QHBoxLayout()
+        controls.addWidget(self._paste_button)
+        controls.addWidget(self._play_button)
+        controls.addWidget(self._reset_button)
+        controls.addStretch()
+        controls.addWidget(self._wpm_label)
+        controls.addWidget(self._wpm_slider)
+
+        layout = QVBoxLayout()
+        layout.addStretch()
+        layout.addWidget(self._word_label)
+        layout.addWidget(self._status_label)
+        layout.addStretch()
+        layout.addLayout(controls)
+
+        container = QWidget()
+        container.setLayout(layout)
+        self.setCentralWidget(container)
+
+    def _paste_from_clipboard(self) -> None:
+        clipboard = ClipboardImporter()
+        text = clipboard.read_text()
+        if not text.strip():
+            self._stop_playback()
+            self._engine.load([])
+            self._word_label.setText("Clipboard is empty")
+            self._update_status()
+            self._play_button.setEnabled(False)
+            self._reset_button.setEnabled(False)
+            return
+
+        self._load_segments(MarkdownImporter().parse(text))
+
+    def _load_segments(self, segments) -> None:
+        self._stop_playback()
+        self._engine.load(segments)
+        if self._engine.is_empty:
+            self._word_label.setText("No readable text found")
+            self._play_button.setEnabled(False)
+            self._reset_button.setEnabled(False)
+        else:
+            self._engine.reset()
+            self._show_current_word()
+            self._play_button.setEnabled(True)
+            self._reset_button.setEnabled(True)
+        self._update_status()
+
+    def _toggle_playback(self) -> None:
+        if self._playing:
+            self._stop_playback()
+            return
+        if self._engine.is_finished:
+            self._engine.reset()
+        self._playing = True
+        self._play_button.setText("Pause")
+        self._timer.start(self._engine.interval_ms())
+        self._show_current_word()
+
+    def _stop_playback(self) -> None:
+        self._playing = False
+        self._timer.stop()
+        self._play_button.setText("Play")
+
+    def _reset_reading(self) -> None:
+        self._stop_playback()
+        self._engine.reset()
+        self._show_current_word()
+        self._update_status()
+
+    def _on_tick(self) -> None:
+        self._engine.advance()
+        self._update_status()
+        if self._engine.is_finished:
+            self._stop_playback()
+            self._word_label.setText("Done")
+            return
+        self._show_current_word()
+        self._timer.setInterval(self._engine.interval_ms())
+
+    def _on_wpm_changed(self, value: int) -> None:
+        self._engine.wpm = value
+        self._wpm_label.setText(f"{value} WPM")
+        self._update_status()
+        if self._playing:
+            self._timer.setInterval(self._engine.interval_ms())
+
+    def _show_current_word(self) -> None:
+        word = self._engine.current_word
+        self._word_label.setText(word if word is not None else "Done")
+
+    def _update_status(self) -> None:
+        total = self._engine.word_count
+        current = min(self._engine.position + (0 if self._engine.is_finished else 1), total)
+        if total == 0:
+            current = 0
+        self._status_label.setText(
+            f"{current} / {total} words · {self._engine.wpm} WPM"
+        )

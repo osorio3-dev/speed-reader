@@ -1,12 +1,31 @@
 """Markdown importer that produces clean TextSegments."""
 
-from typing import List
+from typing import Iterable, List
 
 from mistletoe import Document
-from mistletoe.block_token import BlockCode, CodeFence, Heading, List, ListItem, Paragraph, Quote
+from mistletoe.block_token import (
+    BlockCode,
+    CodeFence,
+    Heading,
+    HtmlBlock,
+    List,
+    ListItem,
+    Paragraph,
+    Quote,
+    SetextHeading,
+    Table,
+    TableRow,
+    ThematicBreak,
+)
 from mistletoe.span_token import Emphasis, LineBreak, Link, RawText, Strong
 
 from speedreader.domain import SegmentKind, TextSegment
+
+
+def _iter_children(token) -> Iterable:
+    """Return block or span children, treating missing children as empty."""
+    children = getattr(token, "children", None)
+    return children or []
 
 
 class MarkdownImporter:
@@ -26,7 +45,7 @@ class MarkdownImporter:
         return segments
 
     def _parse_block(self, token, segments: List[TextSegment]) -> None:
-        if isinstance(token, Heading):
+        if isinstance(token, (Heading, SetextHeading)):
             text = _inline_text(token).strip()
             segments.append(
                 TextSegment(content=text, kind=SegmentKind.HEADING, level=token.level)
@@ -38,11 +57,11 @@ class MarkdownImporter:
                 segments.append(TextSegment(content=text, kind=SegmentKind.PARAGRAPH))
 
         elif isinstance(token, List):
-            for item in token.children:
+            for item in _iter_children(token):
                 self._parse_block(item, segments)
 
         elif isinstance(token, ListItem):
-            text = _block_text(token.children).strip()
+            text = _block_text(_iter_children(token)).strip()
             if text:
                 segments.append(TextSegment(content=text, kind=SegmentKind.LIST_ITEM))
 
@@ -66,9 +85,30 @@ class MarkdownImporter:
                     TextSegment(content=cleaned, kind=SegmentKind.BLOCKQUOTE)
                 )
 
-        elif hasattr(token, "children"):
-            for child in token.children:
+        elif isinstance(token, Table):
+            header = getattr(token, "header", None)
+            if header is not None:
+                self._parse_table_row(header, segments)
+            for row in _iter_children(token):
+                self._parse_table_row(row, segments)
+
+        elif isinstance(token, HtmlBlock):
+            text = getattr(token, "content", _inline_text(token)).strip()
+            if text:
+                segments.append(TextSegment(content=text, kind=SegmentKind.PARAGRAPH))
+
+        elif isinstance(token, ThematicBreak):
+            return
+
+        elif _iter_children(token):
+            for child in _iter_children(token):
                 self._parse_block(child, segments)
+
+    def _parse_table_row(self, row: TableRow, segments: List[TextSegment]) -> None:
+        cells = [_inline_text(cell).strip() for cell in _iter_children(row)]
+        text = " | ".join(cell for cell in cells if cell)
+        if text:
+            segments.append(TextSegment(content=text, kind=SegmentKind.PARAGRAPH))
 
 
 def _inline_text(token, line_break: str = " ") -> str:
@@ -77,17 +117,17 @@ def _inline_text(token, line_break: str = " ") -> str:
         return token.content
 
     if isinstance(token, (Strong, Emphasis)):
-        return "".join(_inline_text(child, line_break) for child in token.children)
+        return "".join(_inline_text(child, line_break) for child in _iter_children(token))
 
     if isinstance(token, Link):
         # For the MVP we read the visible link text only, not the URL.
-        return "".join(_inline_text(child, line_break) for child in token.children)
+        return "".join(_inline_text(child, line_break) for child in _iter_children(token))
 
     if isinstance(token, LineBreak):
         return line_break
 
-    if hasattr(token, "children"):
-        return "".join(_inline_text(child, line_break) for child in token.children)
+    if _iter_children(token):
+        return "".join(_inline_text(child, line_break) for child in _iter_children(token))
 
     return ""
 
@@ -102,21 +142,21 @@ def _block_text(tokens) -> str:
             parts.append(token.content)
         elif isinstance(token, Quote):
             parts.append(_quote_text(token))
-        elif hasattr(token, "children"):
-            parts.append(_block_text(token.children))
+        elif _iter_children(token):
+            parts.append(_block_text(_iter_children(token)))
     return " ".join(part for part in parts if part)
 
 
 def _quote_text(token) -> str:
     """Extract plain text from a quote, preserving line breaks."""
     parts: List[str] = []
-    for child in token.children:
-        if isinstance(child, (Heading, Paragraph)):
+    for child in _iter_children(token):
+        if isinstance(child, (Heading, Paragraph, SetextHeading)):
             parts.append(_inline_text(child, line_break="\n").strip())
         elif isinstance(child, (CodeFence, BlockCode)):
             parts.append(child.content)
         elif isinstance(child, Quote):
             parts.append(_quote_text(child))
-        elif hasattr(child, "children"):
+        elif _iter_children(child):
             parts.append(_quote_text(child))
     return "\n".join(part for part in parts if part)

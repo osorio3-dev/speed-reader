@@ -25,3 +25,4 @@ def test_empty_clipboard() -> None:
     clipboard = FakeClipboard("")
     importer = ClipboardImporter(clipboard=clipboard)
     assert importer.read() == []
+    assert importer.read_text() == ""
