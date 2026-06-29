@@ -77,6 +77,18 @@ class ReadingEngine:
         self._position += 1
         return word
 
+    def retreat(self) -> Optional[str]:
+        """Move to the previous word."""
+        if not self._words:
+            return None
+        if self.is_finished:
+            self._position = len(self._words) - 1
+            return self.current_word
+        if self._position <= 0:
+            return self.current_word
+        self._position -= 1
+        return self.current_word
+
     def interval_ms(self) -> int:
         """Milliseconds to wait between words at the current WPM."""
         return int(60_000 / self._wpm)

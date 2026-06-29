@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -80,6 +80,14 @@ class MainWindow(QMainWindow):
         container = QWidget()
         container.setLayout(layout)
         self.setCentralWidget(container)
+        self._setup_shortcuts()
+
+    def _setup_shortcuts(self) -> None:
+        QShortcut(QKeySequence(Qt.Key.Key_Space), self, self._toggle_playback)
+        QShortcut(QKeySequence.StandardKey.Paste, self, self._paste_from_clipboard)
+        QShortcut(QKeySequence(Qt.Key.Key_Left), self, self._previous_word)
+        QShortcut(QKeySequence(Qt.Key.Key_Right), self, self._next_word)
+        QShortcut(QKeySequence(Qt.Key.Key_R), self, self._reset_reading)
 
     def _paste_from_clipboard(self) -> None:
         clipboard = ClipboardImporter()
@@ -129,6 +137,25 @@ class MainWindow(QMainWindow):
         self._stop_playback()
         self._engine.reset()
         self._show_current_word()
+        self._update_status()
+
+    def _previous_word(self) -> None:
+        if self._engine.is_empty:
+            return
+        self._stop_playback()
+        self._engine.retreat()
+        self._show_current_word()
+        self._update_status()
+
+    def _next_word(self) -> None:
+        if self._engine.is_empty or self._engine.is_finished:
+            return
+        self._stop_playback()
+        self._engine.advance()
+        if self._engine.is_finished:
+            self._word_label.setText("Done")
+        else:
+            self._show_current_word()
         self._update_status()
 
     def _on_tick(self) -> None:

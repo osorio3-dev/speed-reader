@@ -42,6 +42,27 @@ def test_reset_returns_to_start(engine: ReadingEngine) -> None:
     assert engine.current_word == "alpha"
 
 
+def test_retreat_moves_back(engine: ReadingEngine) -> None:
+    engine.load([TextSegment(content="one two three", kind=SegmentKind.PARAGRAPH)])
+    engine.advance()
+    engine.advance()
+    assert engine.current_word == "three"
+    engine.retreat()
+    assert engine.current_word == "two"
+    engine.retreat()
+    assert engine.current_word == "one"
+    engine.retreat()
+    assert engine.current_word == "one"
+
+
+def test_retreat_from_finished_shows_last_word(engine: ReadingEngine) -> None:
+    engine.load([TextSegment(content="only", kind=SegmentKind.PARAGRAPH)])
+    engine.advance()
+    assert engine.is_finished
+    engine.retreat()
+    assert engine.current_word == "only"
+
+
 def test_interval_ms_respects_wpm(engine: ReadingEngine) -> None:
     engine.wpm = 400
     assert engine.interval_ms() == 150
