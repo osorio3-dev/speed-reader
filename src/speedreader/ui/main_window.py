@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from speedreader.engine import DEFAULT_WPM, ReadingEngine
 from speedreader.importers.clipboard import ClipboardImporter
+from speedreader.importers.file import FileImporter
 from speedreader.importers.markdown import MarkdownImporter
 
 
@@ -32,7 +34,7 @@ class MainWindow(QMainWindow):
         self._timer.timeout.connect(self._on_tick)
         self._playing = False
 
-        self._word_label = QLabel("Paste text to begin")
+        self._word_label = QLabel("Paste or open a file to begin")
         self._word_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         word_font = QFont()
         word_font.setPointSize(42)
@@ -44,6 +46,9 @@ class MainWindow(QMainWindow):
 
         self._paste_button = QPushButton("Paste")
         self._paste_button.clicked.connect(self._paste_from_clipboard)
+
+        self._open_button = QPushButton("Open")
+        self._open_button.clicked.connect(self._open_file)
 
         self._play_button = QPushButton("Play")
         self._play_button.clicked.connect(self._toggle_playback)
@@ -63,6 +68,7 @@ class MainWindow(QMainWindow):
         self._wpm_label = QLabel(f"{self._engine.wpm} WPM")
 
         controls = QHBoxLayout()
+        controls.addWidget(self._open_button)
         controls.addWidget(self._paste_button)
         controls.addWidget(self._play_button)
         controls.addWidget(self._reset_button)
@@ -83,6 +89,7 @@ class MainWindow(QMainWindow):
         self._setup_shortcuts()
 
     def _setup_shortcuts(self) -> None:
+        QShortcut(QKeySequence.StandardKey.Open, self, self._open_file)
         QShortcut(QKeySequence(Qt.Key.Key_Space), self, self._toggle_playback)
         QShortcut(QKeySequence.StandardKey.Paste, self, self._paste_from_clipboard)
         QShortcut(QKeySequence(Qt.Key.Key_Left), self, self._previous_word)
@@ -101,9 +108,22 @@ class MainWindow(QMainWindow):
             self._reset_button.setEnabled(False)
             return
 
-        self._load_segments(MarkdownImporter().parse(text))
+        self._load_segments(MarkdownImporter().parse(text), source="Clipboard")
 
-    def _load_segments(self, segments) -> None:
+    def _open_file(self) -> None:
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open text file",
+            "",
+            "Text files (*.txt *.md *.markdown);;All files (*)",
+        )
+        if not file_path:
+            return
+
+        segments = FileImporter().read(file_path)
+        self._load_segments(segments, source=file_path)
+
+    def _load_segments(self, segments, source: str | None = None) -> None:
         self._stop_playback()
         self._engine.load(segments)
         if self._engine.is_empty:
@@ -116,6 +136,13 @@ class MainWindow(QMainWindow):
             self._play_button.setEnabled(True)
             self._reset_button.setEnabled(True)
         self._update_status()
+        self._update_window_title(source)
+
+    def _update_window_title(self, source: str | None = None) -> None:
+        if source:
+            self.setWindowTitle(f"Speedreader — {source}")
+        else:
+            self.setWindowTitle("Speedreader")
 
     def _toggle_playback(self) -> None:
         if self._playing:
