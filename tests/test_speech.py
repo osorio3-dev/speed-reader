@@ -15,14 +15,20 @@ from speedreader.speech.voices import (
 
 def test_wpm_to_qt_rate_maps_around_zero_at_base() -> None:
     assert wpm_to_qt_rate(300) == 0.0
-    assert wpm_to_qt_rate(600) == 1.0
+    assert wpm_to_qt_rate(900) == 1.0
     assert wpm_to_qt_rate(100) < 0
 
 
 def test_wpm_to_length_scale_inverts_wpm() -> None:
     assert wpm_to_length_scale(300) == 1.0
     assert wpm_to_length_scale(600) == 0.5
-    assert wpm_to_length_scale(150) == 2.0
+    assert wpm_to_length_scale(1500) == 0.2
+
+
+def test_wpm_to_length_scale_has_minimum_for_extreme_wpm() -> None:
+    from speedreader.speech.rate import MIN_PIPER_LENGTH_SCALE
+
+    assert wpm_to_length_scale(3000) == MIN_PIPER_LENGTH_SCALE
 
 
 def test_wpm_to_length_scale_applies_pace_multiplier() -> None:

@@ -34,6 +34,10 @@ def main_window(qapp):
 
 
 def test_idle_screen_shows_brand_and_hint(main_window: MainWindow) -> None:
+    main_window._stop_playback()
+    main_window._engine.load([])
+    main_window._show_idle_message()
+    main_window._update_status()
     assert main_window._word_label.text() == IDLE_MESSAGE
     assert IDLE_HINT in main_window._status_label.text()
     assert main_window._settings.load_reading_profile_label() in main_window._status_label.text()
@@ -51,6 +55,8 @@ def test_phrase_tts_mode_requires_piper(main_window: MainWindow) -> None:
 
 def test_profile_change_updates_engine_and_speech_rate(main_window: MainWindow) -> None:
     main_window._speech = _FakeSpeech("Qt")
+    main_window._tts_enabled = True
+    main_window._sync_tts_controls()
     main_window._engine.load([TextSegment("Title here.", SegmentKind.HEADING)])
     normal_index = main_window._profile_combo.findData("normal")
     main_window._profile_combo.setCurrentIndex(normal_index)

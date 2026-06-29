@@ -28,6 +28,8 @@ from speedreader.settings import (
     MIN_FONT_SIZE,
     MIN_WPM,
     SettingsStore,
+    WPM_STEP,
+    snap_wpm,
 )
 from speedreader.paths import app_icon_path
 from speedreader.profiles import READING_PROFILES
@@ -74,6 +76,7 @@ class MainWindow(QMainWindow):
             self._settings.load_tts_voice(),
         )
         self._speech = self._create_speech_backend()
+        self._tts_wpm = self._settings.load_tts_wpm(self._engine.wpm)
         self._apply_speech_rate()
         self._tts_enabled = self._settings.load_tts_enabled()
 
@@ -115,12 +118,25 @@ class MainWindow(QMainWindow):
 
         self._wpm_slider = QSlider(Qt.Orientation.Horizontal)
         self._wpm_slider.setRange(MIN_WPM, MAX_WPM)
-        self._wpm_slider.setValue(self._engine.wpm)
-        self._wpm_slider.setTickInterval(100)
+        self._wpm_slider.setSingleStep(WPM_STEP)
+        self._wpm_slider.setPageStep(100)
+        self._wpm_slider.setValue(snap_wpm(self._engine.wpm))
+        self._wpm_slider.setTickInterval(WPM_STEP)
         self._wpm_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self._wpm_slider.valueChanged.connect(self._on_wpm_changed)
 
-        self._wpm_label = QLabel(f"{self._engine.wpm} WPM")
+        self._wpm_label = QLabel(self._format_rsvp_wpm_label())
+
+        self._tts_wpm_slider = QSlider(Qt.Orientation.Horizontal)
+        self._tts_wpm_slider.setRange(MIN_WPM, MAX_WPM)
+        self._tts_wpm_slider.setSingleStep(WPM_STEP)
+        self._tts_wpm_slider.setPageStep(100)
+        self._tts_wpm_slider.setValue(snap_wpm(self._tts_wpm))
+        self._tts_wpm_slider.setTickInterval(WPM_STEP)
+        self._tts_wpm_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self._tts_wpm_slider.valueChanged.connect(self._on_tts_wpm_changed)
+
+        self._tts_wpm_label = QLabel(self._format_tts_wpm_label())
 
         self._profile_combo = QComboBox()
         for profile in READING_PROFILES.values():
@@ -155,11 +171,15 @@ class MainWindow(QMainWindow):
         wpm_row = QHBoxLayout()
         wpm_row.addWidget(self._wpm_label)
         wpm_row.addWidget(self._wpm_slider)
+        tts_wpm_row = QHBoxLayout()
+        tts_wpm_row.addWidget(self._tts_wpm_label)
+        tts_wpm_row.addWidget(self._tts_wpm_slider)
         profile_row = QHBoxLayout()
         profile_row.addWidget(QLabel("Perfil"))
         profile_row.addWidget(self._profile_combo)
         tuning.addLayout(font_row)
         tuning.addLayout(wpm_row)
+        tuning.addLayout(tts_wpm_row)
         tuning.addLayout(profile_row)
         controls.addLayout(tuning)
 
@@ -185,12 +205,26 @@ class MainWindow(QMainWindow):
         if self._engine.is_empty:
             self._show_idle_message()
 
+        self._sync_tts_controls()
+
+    def _format_rsvp_wpm_label(self) -> str:
+        return f"RSVP {self._engine.wpm}"
+
+    def _format_tts_wpm_label(self) -> str:
+        return f"TTS {self._tts_wpm}"
+
+    def _sync_tts_controls(self) -> None:
+        enabled = self._tts_enabled
+        self._tts_wpm_slider.setEnabled(enabled)
+        self._tts_wpm_label.setEnabled(enabled)
+
     def _show_idle_message(self) -> None:
         self._set_plain_message(IDLE_MESSAGE)
         self._update_status()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._settings.save_wpm(self._engine.wpm)
+        self._settings.save_tts_wpm(self._tts_wpm)
         self._settings.save_font_size(self._normal_word_point_size)
         self._settings.save_tts_enabled(self._tts_enabled)
         self._settings.save_tts_voice(self._selected_voice_id)
@@ -211,7 +245,7 @@ class MainWindow(QMainWindow):
 
     def _apply_speech_rate(self) -> None:
         self._speech.set_rate_from_wpm(
-            self._engine.wpm,
+            self._tts_wpm,
             self._engine.speech_pace_multiplier(),
         )
 
@@ -280,6 +314,7 @@ class MainWindow(QMainWindow):
     def _on_tts_toggled(self, enabled: bool) -> None:
         self._tts_enabled = enabled
         self._settings.save_tts_enabled(enabled)
+        self._sync_tts_controls()
         if not enabled:
             self._speech.stop()
             if self._playing and not self._engine.is_finished:
@@ -595,13 +630,31 @@ class MainWindow(QMainWindow):
         self._timer.setInterval(self._engine.interval_ms())
 
     def _on_wpm_changed(self, value: int) -> None:
+        snapped = snap_wpm(value)
+        if snapped != value:
+            self._wpm_slider.blockSignals(True)
+            self._wpm_slider.setValue(snapped)
+            self._wpm_slider.blockSignals(False)
+            value = snapped
         self._engine.wpm = value
-        self._wpm_label.setText(f"{value} WPM")
+        self._wpm_label.setText(self._format_rsvp_wpm_label())
         self._settings.save_wpm(value)
-        self._apply_speech_rate()
         self._update_status()
         if self._playing and not self._tts_enabled:
             self._timer.setInterval(self._engine.interval_ms())
+
+    def _on_tts_wpm_changed(self, value: int) -> None:
+        snapped = snap_wpm(value)
+        if snapped != value:
+            self._tts_wpm_slider.blockSignals(True)
+            self._tts_wpm_slider.setValue(snapped)
+            self._tts_wpm_slider.blockSignals(False)
+            value = snapped
+        self._tts_wpm = value
+        self._tts_wpm_label.setText(self._format_tts_wpm_label())
+        self._settings.save_tts_wpm(value)
+        self._apply_speech_rate()
+        self._update_status()
 
     def _on_font_size_changed(self, value: int) -> None:
         self._normal_word_point_size = value
@@ -692,7 +745,9 @@ class MainWindow(QMainWindow):
         if total == 0:
             current = 0
         self._status_label.setText(
-            f"{current} / {total} words · {self._engine.wpm} WPM · {self._mode_summary()}"
+            f"{current} / {total} words · RSVP {self._engine.wpm}"
+            + (f" · TTS {self._tts_wpm}" if self._tts_enabled else "")
+            + f" · {self._mode_summary()}"
         )
         if not self._progress_slider.isSliderDown():
             self._sync_progress_slider()

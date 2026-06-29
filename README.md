@@ -51,7 +51,7 @@ uv run speedreader
 ### Flujo básico
 
 1. **Open** (`Ctrl+O`) o **Paste** (`Ctrl+V`) para cargar texto
-2. Ajusta el WPM con el slider (100–1000; default 400)
+2. Ajusta el WPM con el slider (100–1500, saltos de 25; default 400)
 3. **Play** para empezar
 
 Formatos soportados:
@@ -126,7 +126,7 @@ Sin Piper, el botón **TTS** usa `QTextToSpeech` (eSpeak) en español si el sist
 sudo apt install speech-dispatcher espeak-ng
 ```
 
-Con **TTS** activo, la voz marca el ritmo. Con **Piper** se lee frase a frase con RSVP sincronizado; con Qt/eSpeak, palabra a palabra. El perfil **Normal / Estudio / Técnico** ajusta la velocidad visual y de voz según títulos, párrafos y código.
+Con **TTS** activo, la voz marca el ritmo. **RSVP** y **TTS** tienen sliders WPM independientes (100–1500, saltos de 25). Con **Piper** se lee frase a frase con RSVP sincronizado; con Qt/eSpeak, palabra a palabra.
 
 Los bloques de código se omiten en TTS. El WPM controla la velocidad base.
 

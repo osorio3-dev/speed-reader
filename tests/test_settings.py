@@ -8,8 +8,16 @@ from speedreader.settings import SettingsStore, clamp_font_size, clamp_wpm
 def test_clamp_wpm_limits_range() -> None:
     assert clamp_wpm(400) == 400
     assert clamp_wpm(50) == 100
-    assert clamp_wpm(2000) == 1000
+    assert clamp_wpm(2000) == 1500
     assert clamp_wpm("invalid", 400) == 400
+
+
+def test_snap_wpm_rounds_to_step() -> None:
+    from speedreader.settings import snap_wpm
+
+    assert snap_wpm(412) == 400
+    assert snap_wpm(413) == 425
+    assert snap_wpm(1512) == 1500
 
 
 def test_clamp_font_size_limits_range() -> None:
@@ -40,7 +48,7 @@ def test_settings_store_roundtrips_wpm(tmp_path) -> None:
     assert store.load_wpm() == 450
 
     store.save_wpm(9999)
-    assert store.load_wpm() == 1000
+    assert store.load_wpm() == 1500
 
 
 def test_settings_store_roundtrips_reading_session(tmp_path) -> None:
@@ -89,6 +97,18 @@ def test_settings_store_roundtrips_tts_voice(tmp_path) -> None:
 
     store.save_tts_voice("qt")
     assert store.load_tts_voice() == "qt"
+
+
+def test_settings_store_roundtrips_tts_wpm(tmp_path) -> None:
+    ini_path = tmp_path / "speedreader.ini"
+    settings = QSettings(str(ini_path), QSettings.Format.IniFormat)
+    store = SettingsStore(settings)
+
+    store.save_tts_wpm(625)
+    assert store.load_tts_wpm() == 625
+
+    store.save_tts_wpm(1512)
+    assert store.load_tts_wpm() == 1500
 
 
 def test_settings_store_roundtrips_reading_profile(tmp_path) -> None:

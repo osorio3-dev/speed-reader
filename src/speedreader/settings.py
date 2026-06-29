@@ -13,11 +13,13 @@ from speedreader.profiles import DEFAULT_PROFILE_ID, normalize_profile_id, profi
 from speedreader.speech.voices import DEFAULT_PIPER_VOICE, QT_VOICE_ID
 
 MIN_WPM = 100
-MAX_WPM = 1000
+MAX_WPM = 1500
+WPM_STEP = 25
 DEFAULT_FONT_SIZE = 42
 MIN_FONT_SIZE = 24
 MAX_FONT_SIZE = 96
 _WPM_KEY = "wpm"
+_TTS_WPM_KEY = "tts/wpm"
 _FONT_SIZE_KEY = "font_size"
 _SESSION_SOURCE_KIND_KEY = "session/source_kind"
 _SESSION_SOURCE_PATH_KEY = "session/source_path"
@@ -44,8 +46,18 @@ def clamp_wpm(value: object, fallback: int = DEFAULT_WPM) -> int:
     try:
         wpm = int(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
-        return fallback
-    return max(MIN_WPM, min(MAX_WPM, wpm))
+        return snap_wpm(fallback, fallback)
+    return snap_wpm(wpm, fallback)
+
+
+def snap_wpm(value: int, fallback: int = DEFAULT_WPM) -> int:
+    """Clamp and round ``value`` to the configured WPM step."""
+    try:
+        wpm = int(value)
+    except (TypeError, ValueError):
+        wpm = fallback
+    bounded = max(MIN_WPM, min(MAX_WPM, wpm))
+    return int(round(bounded / WPM_STEP) * WPM_STEP)
 
 
 def clamp_font_size(value: object, fallback: int = DEFAULT_FONT_SIZE) -> int:
@@ -70,6 +82,15 @@ class SettingsStore:
     def save_wpm(self, wpm: int) -> None:
         """Persist the current WPM."""
         self._settings.setValue(_WPM_KEY, clamp_wpm(wpm))
+
+    def load_tts_wpm(self, default: Optional[int] = None) -> int:
+        """Return the saved TTS WPM or ``default``."""
+        fallback = self.load_wpm() if default is None else default
+        return clamp_wpm(self._settings.value(_TTS_WPM_KEY, fallback), fallback)
+
+    def save_tts_wpm(self, wpm: int) -> None:
+        """Persist the TTS speaking WPM."""
+        self._settings.setValue(_TTS_WPM_KEY, clamp_wpm(wpm))
 
     def load_font_size(self, default: int = DEFAULT_FONT_SIZE) -> int:
         """Return the saved RSVP font size or ``default``."""
