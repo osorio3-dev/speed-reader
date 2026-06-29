@@ -1,6 +1,9 @@
 """Tests for the file importer."""
 
+from pathlib import Path
+
 from speedreader import FileImporter, SegmentKind
+from speedreader.importers.file import is_supported_file
 
 
 def test_read_txt_file(tmp_path) -> None:
@@ -25,3 +28,9 @@ def test_read_markdown_file(tmp_path) -> None:
     assert segments[0].kind == SegmentKind.HEADING
     assert segments[0].content == "Title"
     assert segments[1].content == "Body text."
+
+
+def test_is_supported_file() -> None:
+    assert is_supported_file("article.md")
+    assert is_supported_file("notes.txt")
+    assert not is_supported_file("image.png")

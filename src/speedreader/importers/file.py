@@ -8,6 +8,13 @@ from speedreader.importers.markdown import MarkdownImporter
 from speedreader.importers.plain_text import PlainTextImporter
 
 _MARKDOWN_SUFFIXES = {".md", ".markdown", ".mdown", ".mkd"}
+_TEXT_SUFFIXES = {".txt", ""}
+SUPPORTED_SUFFIXES = _MARKDOWN_SUFFIXES | _TEXT_SUFFIXES
+
+
+def is_supported_file(path: Union[str, Path]) -> bool:
+    """Return whether ``path`` has a supported text extension."""
+    return Path(path).suffix.lower() in SUPPORTED_SUFFIXES
 
 
 class FileImporter:

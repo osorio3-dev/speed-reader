@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QCloseEvent, QFont, QIcon, QKeySequence, QShortcut
+from PySide6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent, QFont, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 from speedreader.engine import ReadingEngine
 from speedreader.importers.clipboard import ClipboardImporter
 from speedreader.orp import format_word_with_orp
-from speedreader.importers.file import FileImporter
+from speedreader.importers.file import FileImporter, is_supported_file
 from speedreader.importers.markdown import MarkdownImporter
 from speedreader.settings import (
     MAX_FONT_SIZE,
@@ -28,6 +28,7 @@ from speedreader.settings import (
     SettingsStore,
 )
 from speedreader.paths import app_icon_path
+from speedreader.ui.shortcuts_dialog import ShortcutsDialog
 
 
 class MainWindow(QMainWindow):
@@ -37,6 +38,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Speedreader")
         self.resize(720, 360)
+        self.setAcceptDrops(True)
 
         self._settings = SettingsStore()
         self._engine = ReadingEngine(wpm=self._settings.load_wpm())
@@ -47,7 +49,7 @@ class MainWindow(QMainWindow):
         self._source_path: str | None = None
         self._source_kind: str | None = None
 
-        self._word_label = QLabel("Paste or open a file to begin")
+        self._word_label = QLabel("Paste, open, or drop a file to begin")
         self._word_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._apply_word_font_size(self._normal_word_point_size)
 
@@ -143,6 +145,26 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence(Qt.Key.Key_R), self, self._reset_reading)
         QShortcut(QKeySequence(Qt.Key.Key_F11), self, self._toggle_fullscreen)
         QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self._exit_fullscreen)
+        QShortcut(QKeySequence(Qt.Key.Key_Question), self, self._show_shortcuts_help)
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        for url in event.mimeData().urls():
+            if url.isLocalFile() and is_supported_file(url.toLocalFile()):
+                event.acceptProposedAction()
+                return
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        for url in event.mimeData().urls():
+            if not url.isLocalFile():
+                continue
+            file_path = url.toLocalFile()
+            if is_supported_file(file_path):
+                self._open_file_path(file_path)
+                event.acceptProposedAction()
+                return
+
+    def _show_shortcuts_help(self) -> None:
+        ShortcutsDialog(self).exec()
 
     def _toggle_fullscreen(self) -> None:
         if self.isFullScreen():
@@ -194,7 +216,14 @@ class MainWindow(QMainWindow):
         if not file_path:
             return
 
-        segments = FileImporter().read(file_path)
+        self._open_file_path(file_path)
+
+    def _open_file_path(self, file_path: str) -> None:
+        try:
+            segments = FileImporter().read(file_path)
+        except OSError:
+            self._set_plain_message("Could not read file")
+            return
         self._load_segments(segments, source=file_path, source_kind="file")
 
     def _load_segments(

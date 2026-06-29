@@ -94,6 +94,9 @@ rm ~/.local/share/icons/hicolor/256x256/apps/speedreader.png
 | `R` | Reiniciar lectura |
 | `F11` | Pantalla completa (modo foco) |
 | `Esc` | Salir de pantalla completa |
+| `?` | Mostrar atajos de teclado |
+
+Arrastra un archivo `.txt` o `.md` a la ventana para abrirlo.
 
 En pantalla completa se ocultan controles y progreso; la palabra se muestra más grande.
 
