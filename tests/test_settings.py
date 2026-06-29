@@ -2,7 +2,7 @@
 
 from PySide6.QtCore import QSettings
 
-from speedreader.settings import SettingsStore, clamp_wpm
+from speedreader.settings import SettingsStore, clamp_font_size, clamp_wpm
 
 
 def test_clamp_wpm_limits_range() -> None:
@@ -10,6 +10,25 @@ def test_clamp_wpm_limits_range() -> None:
     assert clamp_wpm(50) == 100
     assert clamp_wpm(2000) == 1000
     assert clamp_wpm("invalid", 400) == 400
+
+
+def test_clamp_font_size_limits_range() -> None:
+    assert clamp_font_size(42) == 42
+    assert clamp_font_size(10) == 24
+    assert clamp_font_size(120) == 96
+    assert clamp_font_size("invalid", 42) == 42
+
+
+def test_settings_store_roundtrips_font_size(tmp_path) -> None:
+    ini_path = tmp_path / "speedreader.ini"
+    settings = QSettings(str(ini_path), QSettings.Format.IniFormat)
+    store = SettingsStore(settings)
+
+    store.save_font_size(52)
+    assert store.load_font_size() == 52
+
+    store.save_font_size(10)
+    assert store.load_font_size() == 24
 
 
 def test_settings_store_roundtrips_wpm(tmp_path) -> None:

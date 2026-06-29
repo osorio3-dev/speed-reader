@@ -12,7 +12,11 @@ from speedreader.engine import DEFAULT_WPM
 
 MIN_WPM = 100
 MAX_WPM = 1000
+DEFAULT_FONT_SIZE = 42
+MIN_FONT_SIZE = 24
+MAX_FONT_SIZE = 96
 _WPM_KEY = "wpm"
+_FONT_SIZE_KEY = "font_size"
 _SESSION_SOURCE_KIND_KEY = "session/source_kind"
 _SESSION_SOURCE_PATH_KEY = "session/source_path"
 _SESSION_POSITION_KEY = "session/position"
@@ -36,6 +40,15 @@ def clamp_wpm(value: object, fallback: int = DEFAULT_WPM) -> int:
     return max(MIN_WPM, min(MAX_WPM, wpm))
 
 
+def clamp_font_size(value: object, fallback: int = DEFAULT_FONT_SIZE) -> int:
+    """Clamp ``value`` to the supported font size range."""
+    try:
+        size = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return fallback
+    return max(MIN_FONT_SIZE, min(MAX_FONT_SIZE, size))
+
+
 class SettingsStore:
     """Load and save speedreader preferences."""
 
@@ -49,6 +62,14 @@ class SettingsStore:
     def save_wpm(self, wpm: int) -> None:
         """Persist the current WPM."""
         self._settings.setValue(_WPM_KEY, clamp_wpm(wpm))
+
+    def load_font_size(self, default: int = DEFAULT_FONT_SIZE) -> int:
+        """Return the saved RSVP font size or ``default``."""
+        return clamp_font_size(self._settings.value(_FONT_SIZE_KEY, default), default)
+
+    def save_font_size(self, size: int) -> None:
+        """Persist the RSVP font size."""
+        self._settings.setValue(_FONT_SIZE_KEY, clamp_font_size(size))
 
     def load_reading_session(self) -> Optional[ReadingSession]:
         """Return the last saved file session if it is still valid."""

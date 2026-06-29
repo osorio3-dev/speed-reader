@@ -60,7 +60,7 @@ Formatos soportados:
 - `.txt` → párrafos separados por línea en blanco
 - `.md` / `.markdown` → headings, listas, citas, tablas, etc.
 
-El WPM se guarda entre sesiones en `~/.config/speedreader/`.
+El WPM y el tamaño de fuente se guardan entre sesiones en `~/.config/speedreader/`.
 
 Al cerrar con un archivo abierto, la app guarda la ruta y la posición actual. La próxima vez que la abras, retoma donde lo dejaste. Si terminaste el texto, vuelve al inicio. El contenido pegado del portapapeles no se restaura.
 
@@ -74,12 +74,13 @@ Desde la raíz del proyecto:
 ./scripts/install-desktop.sh
 ```
 
-Esto instala `~/.local/share/applications/speedreader.desktop` apuntando a `scripts/launch.sh`.
+Esto instala `~/.local/share/applications/speedreader.desktop` y el icono en `~/.local/share/icons/`.
 
 Para desinstalar:
 
 ```bash
 rm ~/.local/share/applications/speedreader.desktop
+rm ~/.local/share/icons/hicolor/256x256/apps/speedreader.png
 ```
 
 ## Atajos de teclado
