@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from typing import List, Optional
 
-from speedreader.domain import TextSegment
+from speedreader.domain import SegmentKind, TextSegment
 
 _WORD_PATTERN = re.compile(r"\S+")
 
@@ -22,6 +22,15 @@ _PUNCTUATION_PAUSE_MULTIPLIERS = {
 _ELLIPSIS_PAUSE_MULTIPLIER = 2.0
 _TRAILING_WRAPPERS = "\"')]}>"
 
+_SEGMENT_PACE_MULTIPLIERS: dict[SegmentKind, float] = {
+    SegmentKind.HEADING: 1.3,
+    SegmentKind.PARAGRAPH: 1.0,
+    SegmentKind.LIST_ITEM: 1.15,
+    SegmentKind.CODE_BLOCK: 1.6,
+    SegmentKind.CODE_INLINE: 1.2,
+    SegmentKind.BLOCKQUOTE: 1.2,
+}
+
 
 @dataclass(frozen=True)
 class WordToken:
@@ -29,6 +38,7 @@ class WordToken:
 
     text: str
     segment_index: int
+    segment_kind: SegmentKind
 
 
 DEFAULT_WPM = 400
@@ -101,13 +111,28 @@ class ReadingEngine:
         self._position -= 1
         return self.current_word
 
+    def seek(self, index: int) -> None:
+        """Jump to a word by its zero-based index."""
+        if not self._words:
+            self._position = 0
+            return
+        self._position = max(0, min(index, len(self._words) - 1))
+
     def interval_ms(self) -> int:
         """Milliseconds to display the current word at the current WPM."""
         base = int(60_000 / self._wpm)
-        word = self.current_word
-        if word is None:
+        token = self._current_token()
+        if token is None:
             return base
-        return int(base * punctuation_pause_multiplier(word))
+        multiplier = punctuation_pause_multiplier(
+            token.text
+        ) * segment_pace_multiplier(token.segment_kind)
+        return int(base * multiplier)
+
+    def _current_token(self) -> Optional[WordToken]:
+        if self.is_finished:
+            return None
+        return self._words[self._position]
 
 
 def punctuation_pause_multiplier(word: str) -> float:
@@ -120,10 +145,21 @@ def punctuation_pause_multiplier(word: str) -> float:
     return _PUNCTUATION_PAUSE_MULTIPLIERS.get(stripped[-1], 1.0)
 
 
+def segment_pace_multiplier(kind: SegmentKind) -> float:
+    """Return a delay multiplier for the segment kind of the current word."""
+    return _SEGMENT_PACE_MULTIPLIERS.get(kind, 1.0)
+
+
 def tokenize_segments(segments: List[TextSegment]) -> List[WordToken]:
     """Split segment content into non-whitespace word tokens."""
     words: List[WordToken] = []
     for segment_index, segment in enumerate(segments):
         for match in _WORD_PATTERN.finditer(segment.content):
-            words.append(WordToken(text=match.group(), segment_index=segment_index))
+            words.append(
+                WordToken(
+                    text=match.group(),
+                    segment_index=segment_index,
+                    segment_kind=segment.kind,
+                )
+            )
     return words

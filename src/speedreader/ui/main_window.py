@@ -36,6 +36,8 @@ class MainWindow(QMainWindow):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._on_tick)
         self._playing = False
+        self._source_path: str | None = None
+        self._source_kind: str | None = None
 
         self._word_label = QLabel("Paste or open a file to begin")
         self._word_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -46,6 +48,10 @@ class MainWindow(QMainWindow):
 
         self._status_label = QLabel(f"0 / 0 words · {self._engine.wpm} WPM")
         self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self._progress_slider = QSlider(Qt.Orientation.Horizontal)
+        self._progress_slider.setEnabled(False)
+        self._progress_slider.valueChanged.connect(self._on_progress_changed)
 
         self._paste_button = QPushButton("Paste")
         self._paste_button.clicked.connect(self._paste_from_clipboard)
@@ -86,6 +92,7 @@ class MainWindow(QMainWindow):
         layout.addStretch()
         layout.addWidget(self._word_label)
         layout.addWidget(self._status_label)
+        layout.addWidget(self._progress_slider)
         layout.addStretch()
         layout.addWidget(self._controls)
 
@@ -95,9 +102,11 @@ class MainWindow(QMainWindow):
         self._normal_word_point_size = self._word_label.font().pointSize()
         self._focus_word_point_size = 56
         self._setup_shortcuts()
+        self._restore_reading_session()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._settings.save_wpm(self._engine.wpm)
+        self._persist_reading_session()
         super().closeEvent(event)
 
     def _setup_shortcuts(self) -> None:
@@ -118,6 +127,7 @@ class MainWindow(QMainWindow):
 
     def _enter_fullscreen(self) -> None:
         self._status_label.hide()
+        self._progress_slider.hide()
         self._controls.hide()
         word_font = self._word_label.font()
         word_font.setPointSize(self._focus_word_point_size)
@@ -129,6 +139,7 @@ class MainWindow(QMainWindow):
             return
         self.showNormal()
         self._status_label.show()
+        self._progress_slider.show()
         self._controls.show()
         word_font = self._word_label.font()
         word_font.setPointSize(self._normal_word_point_size)
@@ -146,7 +157,11 @@ class MainWindow(QMainWindow):
             self._reset_button.setEnabled(False)
             return
 
-        self._load_segments(MarkdownImporter().parse(text), source="Clipboard")
+        self._load_segments(
+            MarkdownImporter().parse(text),
+            source="Clipboard",
+            source_kind="clipboard",
+        )
 
     def _open_file(self) -> None:
         file_path, _ = QFileDialog.getOpenFileName(
@@ -159,22 +174,64 @@ class MainWindow(QMainWindow):
             return
 
         segments = FileImporter().read(file_path)
-        self._load_segments(segments, source=file_path)
+        self._load_segments(segments, source=file_path, source_kind="file")
 
-    def _load_segments(self, segments, source: str | None = None) -> None:
+    def _load_segments(
+        self,
+        segments,
+        source: str | None = None,
+        source_kind: str | None = None,
+        resume_position: int | None = None,
+    ) -> None:
         self._stop_playback()
+        self._source_path = source if source_kind == "file" else None
+        self._source_kind = source_kind
         self._engine.load(segments)
         if self._engine.is_empty:
             self._set_plain_message("No readable text found")
             self._play_button.setEnabled(False)
             self._reset_button.setEnabled(False)
         else:
-            self._engine.reset()
+            if resume_position is not None:
+                self._engine.seek(resume_position)
+            else:
+                self._engine.reset()
             self._show_current_word()
             self._play_button.setEnabled(True)
             self._reset_button.setEnabled(True)
+        self._sync_progress_slider()
         self._update_status()
         self._update_window_title(source)
+
+    def _restore_reading_session(self) -> None:
+        session = self._settings.load_reading_session()
+        if session is None:
+            return
+
+        try:
+            segments = FileImporter().read(session.source_path)
+        except OSError:
+            self._settings.clear_reading_session()
+            return
+
+        self._load_segments(
+            segments,
+            source=session.source_path,
+            source_kind="file",
+            resume_position=session.position,
+        )
+
+    def _persist_reading_session(self) -> None:
+        if self._source_kind != "file" or not self._source_path or self._engine.is_empty:
+            self._settings.clear_reading_session()
+            return
+
+        if self._engine.is_finished:
+            position = 0
+        else:
+            position = self._engine.position
+
+        self._settings.save_reading_session(self._source_path, position)
 
     def _update_window_title(self, source: str | None = None) -> None:
         if source:
@@ -253,6 +310,28 @@ class MainWindow(QMainWindow):
         self._word_label.setTextFormat(Qt.TextFormat.RichText)
         self._word_label.setText(format_word_with_orp(word))
 
+    def _on_progress_changed(self, value: int) -> None:
+        if not self._progress_slider.isSliderDown():
+            return
+        self._stop_playback()
+        self._engine.seek(value)
+        self._show_current_word()
+        self._update_status()
+
+    def _sync_progress_slider(self) -> None:
+        total = self._engine.word_count
+        self._progress_slider.blockSignals(True)
+        self._progress_slider.setEnabled(total > 0)
+        maximum = max(total - 1, 0)
+        self._progress_slider.setMaximum(maximum)
+        if total == 0:
+            self._progress_slider.setValue(0)
+        elif self._engine.is_finished:
+            self._progress_slider.setValue(maximum)
+        else:
+            self._progress_slider.setValue(self._engine.position)
+        self._progress_slider.blockSignals(False)
+
     def _update_status(self) -> None:
         total = self._engine.word_count
         current = min(self._engine.position + (0 if self._engine.is_finished else 1), total)
@@ -261,3 +340,5 @@ class MainWindow(QMainWindow):
         self._status_label.setText(
             f"{current} / {total} words · {self._engine.wpm} WPM"
         )
+        if not self._progress_slider.isSliderDown():
+            self._sync_progress_slider()

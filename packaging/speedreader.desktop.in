@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Speedreader
+Comment=Personal RSVP speed reader
+Exec=@ROOT@/scripts/launch.sh
+Path=@ROOT@
+Icon=accessories-text-reader
+Terminal=false
+Categories=Office;Utility;TextEditor;
+StartupNotify=true

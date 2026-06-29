@@ -22,3 +22,39 @@ def test_settings_store_roundtrips_wpm(tmp_path) -> None:
 
     store.save_wpm(9999)
     assert store.load_wpm() == 1000
+
+
+def test_settings_store_roundtrips_reading_session(tmp_path) -> None:
+    ini_path = tmp_path / "speedreader.ini"
+    settings = QSettings(str(ini_path), QSettings.Format.IniFormat)
+    store = SettingsStore(settings)
+    file_path = tmp_path / "chapter.md"
+    file_path.write_text("# Title\n\nBody", encoding="utf-8")
+
+    store.save_reading_session(str(file_path), 12)
+    session = store.load_reading_session()
+
+    assert session is not None
+    assert session.source_path == str(file_path)
+    assert session.position == 12
+
+
+def test_load_reading_session_returns_none_for_missing_file(tmp_path) -> None:
+    ini_path = tmp_path / "speedreader.ini"
+    settings = QSettings(str(ini_path), QSettings.Format.IniFormat)
+    store = SettingsStore(settings)
+
+    store.save_reading_session(str(tmp_path / "missing.md"), 4)
+    assert store.load_reading_session() is None
+
+
+def test_clear_reading_session(tmp_path) -> None:
+    ini_path = tmp_path / "speedreader.ini"
+    settings = QSettings(str(ini_path), QSettings.Format.IniFormat)
+    store = SettingsStore(settings)
+    file_path = tmp_path / "notes.txt"
+    file_path.write_text("hello", encoding="utf-8")
+
+    store.save_reading_session(str(file_path), 1)
+    store.clear_reading_session()
+    assert store.load_reading_session() is None

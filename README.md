@@ -62,6 +62,26 @@ Formatos soportados:
 
 El WPM se guarda entre sesiones en `~/.config/speedreader/`.
 
+Al cerrar con un archivo abierto, la app guarda la ruta y la posición actual. La próxima vez que la abras, retoma donde lo dejaste. Si terminaste el texto, vuelve al inicio. El contenido pegado del portapapeles no se restaura.
+
+La barra de progreso permite saltar a cualquier palabra (arrastrar o clic). Los headings, listas, citas y bloques de código se muestran más despacio que el texto normal.
+
+## Acceso directo en el menú de aplicaciones
+
+Desde la raíz del proyecto:
+
+```bash
+./scripts/install-desktop.sh
+```
+
+Esto instala `~/.local/share/applications/speedreader.desktop` apuntando a `scripts/launch.sh`.
+
+Para desinstalar:
+
+```bash
+rm ~/.local/share/applications/speedreader.desktop
+```
+
 ## Atajos de teclado
 
 | Tecla | Acción |

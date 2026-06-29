@@ -3,7 +3,11 @@
 import pytest
 
 from speedreader import ReadingEngine, SegmentKind, TextSegment
-from speedreader.engine import punctuation_pause_multiplier, tokenize_segments
+from speedreader.engine import (
+    punctuation_pause_multiplier,
+    segment_pace_multiplier,
+    tokenize_segments,
+)
 
 
 @pytest.fixture
@@ -19,6 +23,17 @@ def test_tokenize_segments_splits_words() -> None:
     words = tokenize_segments(segments)
     assert [word.text for word in words] == ["Hello", "world", "Second", "line", "here"]
     assert [word.segment_index for word in words] == [0, 0, 1, 1, 1]
+    assert all(word.segment_kind == SegmentKind.PARAGRAPH for word in words)
+
+
+def test_tokenize_segments_preserves_segment_kind() -> None:
+    segments = [
+        TextSegment(content="Title", kind=SegmentKind.HEADING),
+        TextSegment(content="print(x)", kind=SegmentKind.CODE_BLOCK),
+    ]
+    words = tokenize_segments(segments)
+    assert words[0].segment_kind == SegmentKind.HEADING
+    assert words[1].segment_kind == SegmentKind.CODE_BLOCK
 
 
 def test_load_and_advance(engine: ReadingEngine) -> None:
@@ -86,6 +101,26 @@ def test_interval_ms_applies_punctuation_pause(engine: ReadingEngine) -> None:
     engine.advance()
     assert engine.current_word == "stop."
     assert engine.interval_ms() == 500
+
+
+def test_segment_pace_multiplier() -> None:
+    assert segment_pace_multiplier(SegmentKind.PARAGRAPH) == 1.0
+    assert segment_pace_multiplier(SegmentKind.HEADING) == 1.3
+    assert segment_pace_multiplier(SegmentKind.CODE_BLOCK) == 1.6
+
+
+def test_interval_ms_applies_segment_pace(engine: ReadingEngine) -> None:
+    engine.wpm = 300
+    engine.load([TextSegment(content="Title", kind=SegmentKind.HEADING)])
+    assert engine.interval_ms() == 260
+
+
+def test_seek_jumps_to_word(engine: ReadingEngine) -> None:
+    engine.load([TextSegment(content="one two three four", kind=SegmentKind.PARAGRAPH)])
+    engine.seek(2)
+    assert engine.current_word == "three"
+    engine.seek(99)
+    assert engine.current_word == "four"
 
 
 def test_empty_load(engine: ReadingEngine) -> None:
