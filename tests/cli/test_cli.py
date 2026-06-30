@@ -43,9 +43,9 @@ def test_help_succeeds() -> None:
 
 def test_read_missing_file_exits_with_error() -> None:
     """speedreader-cli read yields non-zero exit for a non-existent file."""
-    result = runner.invoke(app, ["read", "/no/such/file"])
+    result = runner.invoke(app, ["/no/such/file"])
     assert result.exit_code != 0
-    assert "Error" in result.stdout or "not found" in result.stdout
+    assert "Error" in result.output or "not found" in result.output
 
 
 def test_read_displays_words(tmp_path: Path) -> None:
@@ -54,21 +54,21 @@ def test_read_displays_words(tmp_path: Path) -> None:
     file.write_text("Hello world")
 
     result = runner.invoke(
-        app, ["read", str(file), "--wpm", "9999", "--max-words", "2"],
+        app, ["--wpm", "9999", "--max-words", "2", str(file)],
     )
     assert result.exit_code == 0
-    assert "Hello" in result.stdout
-    assert "world" in result.stdout
+    assert "Hello" in result.stdout.replace("\033[1;33m", "").replace("\033[0m", "")
+    assert "world" in result.stdout.replace("\033[1;33m", "").replace("\033[0m", "")
 
 
 def test_read_from_stdin() -> None:
     """read command reads from stdin when no file argument is given."""
     result = runner.invoke(
-        app, ["read", "--wpm", "9999", "--max-words", "2"],
+        app, ["--wpm", "9999", "--max-words", "2"],
         input="piped content\n",
     )
     assert result.exit_code == 0
-    assert "piped" in result.stdout
+    assert "piped" in result.stdout.replace("\033[1;33m", "").replace("\033[0m", "")
 
 
 def test_no_pyside6_during_cli() -> None:
