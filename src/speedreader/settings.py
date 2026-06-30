@@ -8,9 +8,13 @@ from typing import Optional
 
 from PySide6.QtCore import QSettings
 
+from speedreader.core.protocols import SettingsProtocol
 from speedreader.engine import DEFAULT_WPM
 from speedreader.profiles import DEFAULT_PROFILE_ID, normalize_profile_id, profile_label
 from speedreader.speech.voices import DEFAULT_PIPER_VOICE, QT_VOICE_ID
+
+# SettingsStore structurally conforms to SettingsProtocol via duck-typing.
+# All required load/save methods are defined below with matching signatures.
 
 MIN_WPM = 100
 MAX_WPM = 1500

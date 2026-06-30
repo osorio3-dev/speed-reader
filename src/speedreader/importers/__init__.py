@@ -1,1 +1,2 @@
-"""Importers that convert raw text sources into TextSegments."""
+"""Importers — shim for backward compatibility."""
+from speedreader.core.importers import *  # noqa: F401, F403

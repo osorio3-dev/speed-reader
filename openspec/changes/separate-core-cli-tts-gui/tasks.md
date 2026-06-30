@@ -26,14 +26,14 @@ Chain strategy: pending
 
 ## Commit 2: `refactor(core): extract importers and speech protocol` (~680 lines)
 
-- [ ] 2.1 [RED] Write `tests/core/importers/test_importers_no_qt.py` — no PySide6 after core importers load
-- [ ] 2.2 [RED] Write `tests/core/test_speech_protocols_no_qt.py` — import core.speech, assert no PySide6
-- [ ] 2.3 [RED] Write `tests/core/test_settings_protocol.py` — dict-backed FakeSettings conforms to SettingsProtocol
-- [ ] 2.4 [GREEN] Create `core/protocols.py` — SettingsProtocol + ClipboardProtocol
-- [ ] 2.5 [GREEN] Create `core/speech.py`, `core/rate.py` — move SpeechBackend + rate helpers
-- [ ] 2.6 [GREEN] Create `core/importers/` — copy all importers, add ClipboardProtocol injection to ClipboardImporter
-- [ ] 2.7 [REFACTOR] Shim old importers + `speech/base.py`; add SettingsProtocol conformance to `settings.py`
-- [ ] 2.8 Verify importer tests pass at old locations via shims + `tests/core/`
+- [x] 2.1 [RED] Write `tests/core/importers/test_importers_no_qt.py` — no PySide6 after core importers load
+- [x] 2.2 [RED] Write `tests/core/test_speech_protocols_no_qt.py` — import core.speech, assert no PySide6
+- [x] 2.3 [RED] Write `tests/core/test_settings_protocol.py` — dict-backed FakeSettings conforms to SettingsProtocol
+- [x] 2.4 [GREEN] Create `core/protocols.py` — SettingsProtocol + ClipboardProtocol
+- [x] 2.5 [GREEN] Create `core/speech.py`, `core/rate.py` — move SpeechBackend + rate helpers
+- [x] 2.6 [GREEN] Create `core/importers/` — copy all importers, add ClipboardProtocol injection to ClipboardImporter
+- [x] 2.7 [REFACTOR] Shim old importers + `speech/base.py`; add SettingsProtocol conformance to `settings.py`
+- [x] 2.8 Verify importer tests pass at old locations via shims + `tests/core/`
 
 ## Commit 3: `feat(cli): add speedreader-cli` (~280 lines)
 
