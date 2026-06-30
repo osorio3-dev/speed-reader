@@ -1,0 +1,52 @@
+# openspec/config.yaml
+schema: spec-driven
+
+context: |
+  Project: speedreader (reader) — Personal speed-reading station
+  Language: Python 3.11+
+  Stack: PySide6 desktop GUI, mistletoe Markdown parser, optional piper-tts for local TTS
+  Architecture: Monolithic — RSVP engine, domain models, profiles, ORP display, importers,
+    speech backends, and PySide6 MainWindow (750+ lines) bundled into src/speedreader/.
+    Planned: separate core logic from UI, add CLI with typer, refactor MainWindow into
+    controller + UI layers, move TTS off main thread.
+  Test runner: uv run pytest (pytest 8.0+)
+  Coverage: Not configured (pytest-cov not installed)
+  Linting: Not configured (ruff not installed)
+  Type checking: Not configured (mypy not installed)
+  Formatter: Not configured (black not installed)
+  Convention: src/speedreader/ layout, tests/ mirror, setuptools build via pyproject.toml
+  Delivery: commit-only (no PRs), review budget 400 lines
+
+testing:
+  strict_tdd: true
+  runner: uv run pytest
+  framework: pytest
+  layers:
+    unit: available
+    integration: partial
+    e2e: none
+  coverage: false
+
+rules:
+  proposal:
+    - Include context of what's changing and why
+    - Reference existing architecture patterns
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+  design:
+    - Include architecture decision records
+    - Document refactoring boundaries (core vs UI)
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+  apply:
+    - Follow existing code patterns (src/ layout, typing, docstrings)
+    tdd: true
+    test_command: "uv run pytest"
+  verify:
+    test_command: "uv run pytest"
+    build_command: "uv run -m speedreader --help"
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas

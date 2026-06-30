@@ -1,0 +1,181 @@
+%% Auditoría de arquitectura - Speedreader
+%% Colores por severidad:
+%%   crítico  : #ff6b6b (rojo)
+%%   alto     : #feca57 (amarillo)
+%%   medio    : #48dbfb (azul)
+%%   positivo : #1dd1a1 (verde)
+%%
+%% Para verlo renderizado abrí el archivo en:
+%%   https://mermaid.live
+
+flowchart TD
+    %% ============================================================
+    %% Capa de entrada del usuario
+    %% ============================================================
+    subgraph Entrada["Entrada de usuario"]
+        direction TB
+        IN_FILE["Archivo .txt / .md"]
+        IN_CLIP["Clipboard"]
+        IN_DROP["Drag & Drop"]
+    end
+
+    %% ============================================================
+    %% Capa de importación
+    %% ============================================================
+    subgraph Importers["Importers (src/speedreader/importers/)"]
+        direction TB
+        FI["FileImporter"]
+        MI["MarkdownImporter"]
+        PI["PlainTextImporter"]
+        CI["ClipboardImporter"]
+    end
+
+    %% ============================================================
+    %% Capa de UI
+    %% ============================================================
+    subgraph UI["UI Layer (src/speedreader/ui/)"]
+        direction TB
+        MW["MainWindow<br/>~765 líneas"]
+        SD["ShortcutsDialog"]
+    end
+
+    %% ============================================================
+    %% Capa de dominio / motor
+    %% ============================================================
+    subgraph Dominio["Dominio / Engine"]
+        direction TB
+        ENG["ReadingEngine"]
+        DOM["Segment / TextSegment / WordToken"]
+        ORP["ORP formatter"]
+        PROF["Profiles"]
+    end
+
+    %% ============================================================
+    %% Capa de voz
+    %% ============================================================
+    subgraph Speech["Speech (src/speedreader/speech/)"]
+        direction TB
+        PF["SpeechFactory"]
+        PB["PiperBackend"]
+        QB["QtBackend"]
+        VM["VoiceResolver"]
+    end
+
+    %% ============================================================
+    %% Persistencia
+    %% ============================================================
+    subgraph Persistencia["Persistencia"]
+        direction TB
+        ST["SettingsStore<br/>QSettings"]
+    end
+
+    %% ============================================================
+    %% Flujos normales
+    %% ============================================================
+    IN_FILE -->|read_text| FI
+    IN_CLIP --> MW
+    IN_DROP --> MW
+
+    FI -->|segmentos| MI
+    FI -->|segmentos| PI
+    CI -->|dead code en prod| MI
+
+    MI -->|tokens| ENG
+    PI -->|tokens| ENG
+
+    ENG --> DOM
+    DOM --> ORP
+    ORP -->|HTML escapado*| MW
+    PROF --> ENG
+
+    MW -->|play/pause/seek| ENG
+    MW -->|crea| PF
+    PF -->|intenta| PB
+    PF -->|fallback| QB
+    PB -->|carga .onnx| VM
+
+    MW <-->|guarda/restaura sesión| ST
+
+    %% ============================================================
+    %% Fallas críticas
+    %% ============================================================
+    classDef crit fill:#ff6b6b,stroke:#c0392b,stroke-width:2px,color:#fff
+    classDef high fill:#feca57,stroke:#f39c12,stroke-width:2px,color:#000
+    classDef med fill:#48dbfb,stroke:#2980b9,stroke-width:1px,color:#000
+    classDef good fill:#1dd1a1,stroke:#27ae60,stroke-width:1px,color:#000
+
+    MW:::crit
+    PB:::crit
+    FI:::crit
+
+    F1["CRÍTICO<br/>MainWindow es God Object:<br/>mezcla UI, estado, TTS,<br/>settings y motor"]:::crit
+    MW -.-> F1
+
+    F2["CRÍTICO<br/>Piper synthesis corre en<br/>main thread -> UI freeze"]:::crit
+    PB -.-> F2
+
+    F3["CRÍTICO<br/>Modelo ONNX cargado<br/>in-process sin verificar hash"]:::crit
+    VM -.-> F3
+
+    F4["CRÍTICO<br/>UnicodeDecodeError no<br/>capturada -> crash"]:::crit
+    FI -.-> F4
+
+    F5["CRÍTICO<br/>Sin sys.excepthook global:<br/>cualquier slot mata el proceso"]:::crit
+    APP["app.py / __main__.py"]:::crit
+    APP -.-> F5
+
+    %% ============================================================
+    %% Fallas altas
+    %% ============================================================
+    F6["ALTO<br/>voice_id sin sanitizar:<br/>path traversal"]:::high
+    VM -.-> F6
+
+    F7["ALTO<br/>Sin límite de tamaño de archivo:<br/>OOM / bloqueo"]:::high
+    FI -.-> F7
+
+    F8["ALTO<br/>Markdown parsea sin timeout:<br/>pathological input"]:::high
+    MI -.-> F8
+
+    F9["ALTO<br/>Detección de phrase-mode por<br/>prefix string 'Piper'"]:::high
+    MW -.-> F9
+
+    F10["ALTO<br/>QAudioSink errores no manejados:<br/>callback nunca llega"]:::high
+    PB -.-> F10
+
+    F11["ALTO<br/>No hay tests del lifecycle<br/>de TTS"]:::high
+    subgraph Tests["Tests"]
+        T_TTS["test_speech.py"]
+        T_MW["test_main_window.py"]
+    end
+    T_TTS -.-> F11
+
+    %% ============================================================
+    %% Fallas medias
+    %% ============================================================
+    F12["MEDIO<br/>PlainTextImporter deja \\r<br/>en Windows"]:::med
+    PI -.-> F12
+
+    F13["MEDIO<br/>Settings guarda path absoluto:<br/>leak de historial"]:::med
+    ST -.-> F13
+
+    F14["MEDIO<br/>Sin logging / observabilidad"]:::med
+    MW -.-> F14
+
+    F15["MEDIO<br/>ClipboardImporter bypassed:<br/>UI llama MarkdownImporter directo"]:::med
+    MW -.-> F15
+
+    %% ============================================================
+    %% Prácticas positivas
+    %% ============================================================
+    G1["BUENO<br/>html.escape en ORP"]:::good
+    ORP -.-> G1
+
+    G2["BUENO<br/>Settings clamping + enum validation"]:::good
+    ST -.-> G2
+
+    G3["BUENO<br/>Fallback Piper -> Qt"]:::good
+    PF -.-> G3
+
+    G4["BUENO<br/>Importers con inyección de deps"]:::good
+    FI -.-> G4
+    CI -.-> G4
