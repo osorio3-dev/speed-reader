@@ -1,8 +1,12 @@
-"""Main application window for RSVP speed reading."""
+"""Main application window for RSVP speed reading.
+
+Thin view: owns widgets, layout, drag-drop, and keyboard shortcuts.
+Playback state and timers live in ReadingController.
+"""
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent, QFont, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
@@ -17,11 +21,10 @@ from PySide6.QtWidgets import (
 )
 
 from speedreader.engine import ReadingEngine
-from speedreader.domain import SegmentKind
 from speedreader.importers.clipboard import ClipboardImporter
-from speedreader.orp import format_word_with_orp
 from speedreader.importers.file import FileImporter, is_supported_file
 from speedreader.importers.markdown import MarkdownImporter
+from speedreader.orp import format_word_with_orp
 from speedreader.settings import (
     MAX_FONT_SIZE,
     MAX_WPM,
@@ -41,6 +44,7 @@ from speedreader.speech.voices import (
     resolve_voice_selection,
     voice_label,
 )
+from speedreader.ui.reading_controller import ReadingController
 from speedreader.ui.shortcuts_dialog import ShortcutsDialog
 
 IDLE_MESSAGE = "-- Speedreader --"
@@ -48,7 +52,18 @@ IDLE_HINT = "Pega, abre (Ctrl+O) o arrastra un .txt / .md"
 
 
 class MainWindow(QMainWindow):
-    """RSVP reader with paste, play/pause, and WPM controls."""
+    """RSVP reader with paste, play/pause, and WPM controls.
+
+    Signals
+    -------
+    play_requested : emitted when the user wants to start/resume (wired to controller).
+    pause_requested : emitted when the user wants to pause (wired to controller).
+    seek_requested(int) : emitted when the user drags the progress slider.
+    """
+
+    play_requested = Signal()
+    pause_requested = Signal()
+    seek_requested = Signal(int)
 
     def __init__(self) -> None:
         super().__init__()
@@ -56,40 +71,51 @@ class MainWindow(QMainWindow):
         self.resize(720, 360)
         self.setAcceptDrops(True)
 
+        # -- Persistent settings --
         self._settings = SettingsStore()
-        self._engine = ReadingEngine(
+
+        # -- Backing stores for property shims (set before controller exists) --
+        _engine = ReadingEngine(
             wpm=self._settings.load_wpm(),
             profile_id=self._settings.load_reading_profile(),
         )
+        self._engine_backing = _engine
+        self._speech_backing = None  # set below
+
         self._normal_word_point_size = self._settings.load_font_size()
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self._on_tick)
-        self._phrase_timer = QTimer(self)
-        self._phrase_timer.timeout.connect(self._on_phrase_visual_tick)
-        self._phrase_word_offset = 0
-        self._playing = False
-        self._source_path: str | None = None
-        self._source_kind: str | None = None
         self._voices_dir = self._settings.load_voices_dir()
         self._selected_voice_id = resolve_voice_selection(
             self._voices_dir,
             self._settings.load_tts_voice(),
         )
-        self._speech = self._create_speech_backend()
-        self._tts_wpm = self._settings.load_tts_wpm(self._engine.wpm)
-        self._apply_speech_rate()
-        self._tts_enabled = self._settings.load_tts_enabled()
+        _speech = self._create_speech_backend()
+        self._speech_backing = _speech
 
+        # -- Controller (owns timers, playback state, emits signals) --
+        self._controller = ReadingController(
+            _engine, _speech, self._settings, self,
+        )
+        self._controller.word_changed.connect(self._on_word_changed)
+        self._controller.status_changed.connect(self._on_status_changed)
+        self._controller.finished.connect(self._on_reading_finished)
+        self._controller.progress_changed.connect(self._on_progress_changed)
+
+        # Wire view signals to controller API
+        self.play_requested.connect(self._controller.play)
+        self.pause_requested.connect(self._controller.pause)
+        self.seek_requested.connect(self._controller.seek)
+
+        # -- Widgets --
         self._word_label = QLabel(IDLE_MESSAGE)
         self._word_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._apply_word_font_size(self._normal_word_point_size)
 
-        self._status_label = QLabel(f"0 / 0 words · {self._engine.wpm} WPM")
+        self._status_label = QLabel("")
         self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self._progress_slider = QSlider(Qt.Orientation.Horizontal)
         self._progress_slider.setEnabled(False)
-        self._progress_slider.valueChanged.connect(self._on_progress_changed)
+        self._progress_slider.valueChanged.connect(self._on_progress_dragged)
 
         self._paste_button = QPushButton("Paste")
         self._paste_button.clicked.connect(self._paste_from_clipboard)
@@ -98,7 +124,7 @@ class MainWindow(QMainWindow):
         self._open_button.clicked.connect(self._open_file)
 
         self._play_button = QPushButton("Play")
-        self._play_button.clicked.connect(self._toggle_playback)
+        self._play_button.clicked.connect(self._on_play_clicked)
         self._play_button.setEnabled(False)
 
         self._reset_button = QPushButton("Reset")
@@ -155,6 +181,7 @@ class MainWindow(QMainWindow):
 
         self._font_label = QLabel(f"{self._normal_word_point_size} pt")
 
+        # -- Layout --
         controls = QHBoxLayout()
         controls.addWidget(self._open_button)
         controls.addWidget(self._paste_button)
@@ -207,6 +234,116 @@ class MainWindow(QMainWindow):
 
         self._sync_tts_controls()
 
+    # ------------------------------------------------------------------
+    # Backward-compatible property shims (used by existing tests)
+    # Backing stores allow access before ReadingController is created.
+    # ------------------------------------------------------------------
+
+    @property
+    def _engine(self) -> ReadingEngine:
+        if hasattr(self, '_controller'):
+            return self._controller.engine
+        return self._engine_backing
+
+    @_engine.setter
+    def _engine(self, value: ReadingEngine) -> None:
+        self._engine_backing = value
+        if hasattr(self, '_controller'):
+            self._controller._engine = value  # type: ignore[assignment]
+
+    @property
+    def _speech(self) -> SpeechBackend:
+        if hasattr(self, '_controller'):
+            return self._controller.speech
+        return self._speech_backing
+
+    @_speech.setter
+    def _speech(self, backend: SpeechBackend) -> None:
+        self._speech_backing = backend
+        if hasattr(self, '_controller'):
+            self._controller.speech = backend
+
+    @property
+    def _playing(self) -> bool:
+        return self._controller.playing
+
+    @_playing.setter
+    def _playing(self, value: bool) -> None:
+        self._controller._playing = value  # type: ignore[assignment]
+
+    @property
+    def _tts_enabled(self) -> bool:
+        return self._controller.tts_enabled
+
+    @_tts_enabled.setter
+    def _tts_enabled(self, value: bool) -> None:
+        self._controller.tts_enabled = value
+
+    @property
+    def _tts_wpm(self) -> int:
+        return self._controller.tts_wpm
+
+    @_tts_wpm.setter
+    def _tts_wpm(self, value: int) -> None:
+        self._controller.tts_wpm = value
+
+    @property
+    def _source_path(self) -> str | None:
+        if not hasattr(self, '_controller'):
+            return None
+        return self._controller.source_path
+
+    @_source_path.setter
+    def _source_path(self, value: str | None) -> None:
+        if hasattr(self, '_controller'):
+            self._controller._source_path = value  # type: ignore[assignment]
+
+    @property
+    def _source_kind(self) -> str | None:
+        if not hasattr(self, '_controller'):
+            return None
+        return self._controller.source_kind
+
+    @_source_kind.setter
+    def _source_kind(self, value: str | None) -> None:
+        if hasattr(self, '_controller'):
+            self._controller._source_kind = value  # type: ignore[assignment]
+
+    # ------------------------------------------------------------------
+    # Backward-compatible method shims (used by existing tests)
+    # ------------------------------------------------------------------
+
+    def _stop_playback(self) -> None:
+        self._controller.stop()
+
+    def _toggle_playback(self) -> None:
+        self._controller.toggle()
+
+    def _reset_reading(self) -> None:
+        self._controller.stop()
+        self._controller.engine.reset()
+        self._show_reading_position()
+        self._update_status()
+
+    def _previous_word(self) -> None:
+        self._controller.previous_word()
+
+    def _next_word(self) -> None:
+        self._controller.next_word()
+
+    def _display_position(self) -> int:
+        return self._controller.display_position()
+
+    def _uses_phrase_tts(self) -> bool:
+        return self._controller._uses_phrase_tts()  # type: ignore[return-value]
+
+    def _apply_speech_rate(self) -> None:
+        self._controller._apply_speech_rate()  # type: ignore[return-value]
+
+    # ------------------------------------------------------------------
+    # View helpers
+    # ------------------------------------------------------------------
+
     def _format_rsvp_wpm_label(self) -> str:
         return f"RSVP {self._engine.wpm}"
 
@@ -222,16 +359,134 @@ class MainWindow(QMainWindow):
         self._set_plain_message(IDLE_MESSAGE)
         self._update_status()
 
-    def closeEvent(self, event: QCloseEvent) -> None:
-        self._settings.save_wpm(self._engine.wpm)
-        self._settings.save_tts_wpm(self._tts_wpm)
-        self._settings.save_font_size(self._normal_word_point_size)
-        self._settings.save_tts_enabled(self._tts_enabled)
-        self._settings.save_tts_voice(self._selected_voice_id)
+    def _focus_font_size(self, normal_size: int) -> int:
+        return min(normal_size + 14, MAX_FONT_SIZE + 14)
+
+    def _apply_word_font_size(self, point_size: int) -> None:
+        word_font = self._word_label.font()
+        word_font.setPointSize(point_size)
+        word_font.setBold(True)
+        self._word_label.setFont(word_font)
+
+    def _set_plain_message(self, message: str) -> None:
+        self._word_label.setTextFormat(Qt.TextFormat.PlainText)
+        self._word_label.setText(message)
+
+    # ------------------------------------------------------------------
+    # Controller signal handlers
+    # ------------------------------------------------------------------
+
+    def _on_word_changed(self, text: str) -> None:
+        """Update the word label when the controller emits a new word."""
+        # Phrases (plain text with spaces) use word-wrap + PlainText;
+        # individual ORP-highlighted words use RichText + no wrap.
+        if self._uses_phrase_tts() and " " in text and "<span" not in text:
+            self._word_label.setWordWrap(True)
+            self._word_label.setTextFormat(Qt.TextFormat.PlainText)
+            self._word_label.setText(text)
+        else:
+            self._word_label.setWordWrap(False)
+            self._word_label.setTextFormat(Qt.TextFormat.RichText)
+            self._word_label.setText(text)
+
+    def _on_status_changed(self, status: str) -> None:
+        """React to status changes (update play button, status bar)."""
+        if status == "playing":
+            self._play_button.setText("Pause")
+        else:
+            self._play_button.setText("Play")
+        self._update_status()
+
+    def _on_reading_finished(self) -> None:
+        """Reading reached the end."""
+        self._update_status()
+
+    def _on_progress_changed(self, position: int, total: int) -> None:
+        """Sync the progress slider (unless the user is dragging it)."""
+        if not self._progress_slider.isSliderDown():
+            self._sync_progress_slider()
+            self._update_status()
+
+    # ------------------------------------------------------------------
+    # Widget event handlers
+    # ------------------------------------------------------------------
+
+    def _on_play_clicked(self) -> None:
+        """Play/pause button clicked — emit the appropriate signal."""
+        if self._controller.playing:
+            self.pause_requested.emit()
+        else:
+            self.play_requested.emit()
+
+    def _on_progress_dragged(self, value: int) -> None:
+        """User dragged the progress slider."""
+        if not self._progress_slider.isSliderDown():
+            return
+        self.seek_requested.emit(value)
+
+    def _on_wpm_changed(self, value: int) -> None:
+        snapped = snap_wpm(value)
+        if snapped != value:
+            self._wpm_slider.blockSignals(True)
+            self._wpm_slider.setValue(snapped)
+            self._wpm_slider.blockSignals(False)
+            value = snapped
+        self._controller.set_wpm(value)
+        self._wpm_label.setText(self._format_rsvp_wpm_label())
+        self._settings.save_wpm(value)
+        self._update_status()
+
+    def _on_tts_wpm_changed(self, value: int) -> None:
+        snapped = snap_wpm(value)
+        if snapped != value:
+            self._tts_wpm_slider.blockSignals(True)
+            self._tts_wpm_slider.setValue(snapped)
+            self._tts_wpm_slider.blockSignals(False)
+            value = snapped
+        self._controller.set_tts_wpm(value)
+        self._tts_wpm_label.setText(self._format_tts_wpm_label())
+        self._settings.save_tts_wpm(value)
+        self._update_status()
+
+    def _on_font_size_changed(self, value: int) -> None:
+        self._normal_word_point_size = value
+        self._font_label.setText(f"{value} pt")
+        self._settings.save_font_size(value)
+        if self.isFullScreen():
+            self._apply_word_font_size(self._focus_font_size(value))
+        else:
+            self._apply_word_font_size(value)
+
+    def _on_profile_changed(self, index: int) -> None:
+        if index < 0:
+            return
+        profile_id = self._profile_combo.itemData(index)
+        if not profile_id or profile_id == self._engine.profile_id:
+            return
+        self._controller.set_profile(str(profile_id))
         self._settings.save_reading_profile(self._engine.profile_id)
-        self._persist_reading_session()
-        self._speech.stop()
-        super().closeEvent(event)
+        self._update_status()
+
+    def _on_tts_toggled(self, enabled: bool) -> None:
+        self._controller.tts_enabled = enabled
+        self._settings.save_tts_enabled(enabled)
+        self._sync_tts_controls()
+        self._show_reading_position()
+        self._update_status()
+
+    def _on_voice_changed(self, index: int) -> None:
+        if index < 0:
+            return
+        voice_id = self._voice_combo.itemData(index)
+        if not voice_id or voice_id == self._selected_voice_id:
+            return
+        self._selected_voice_id = str(voice_id)
+        self._settings.save_tts_voice(self._selected_voice_id)
+        self._reload_speech_backend()
+
+    # ------------------------------------------------------------------
+    # Speech / Voice
+    # ------------------------------------------------------------------
 
     def _create_speech_backend(self) -> SpeechBackend:
         preference = "qt" if self._selected_voice_id == QT_VOICE_ID else "auto"
@@ -240,31 +495,8 @@ class MainWindow(QMainWindow):
             voices_dir=self._voices_dir,
             voice_id=self._selected_voice_id,
         )
-        backend.set_finished_callback(self._on_speech_finished)
+        # Note: finished callback is set by ReadingController after construction
         return backend
-
-    def _apply_speech_rate(self) -> None:
-        self._speech.set_rate_from_wpm(
-            self._tts_wpm,
-            self._engine.speech_pace_multiplier(),
-        )
-
-    def _on_profile_changed(self, index: int) -> None:
-        if index < 0:
-            return
-        profile_id = self._profile_combo.itemData(index)
-        if not profile_id or profile_id == self._engine.profile_id:
-            return
-        self._engine.set_profile(str(profile_id))
-        self._settings.save_reading_profile(self._engine.profile_id)
-        self._apply_speech_rate()
-        self._update_status()
-        if self._playing and self._tts_enabled:
-            self._phrase_timer.setInterval(
-                self._engine.interval_ms_at(self._display_position())
-            )
-        elif self._playing and not self._tts_enabled:
-            self._timer.setInterval(self._engine.interval_ms())
 
     def _refresh_voice_combo(self) -> None:
         installed = list_installed_piper_voices(self._voices_dir)
@@ -291,161 +523,15 @@ class MainWindow(QMainWindow):
 
     def _reload_speech_backend(self) -> None:
         was_playing = self._playing
-        self._speech.stop()
-        self._speech = self._create_speech_backend()
-        self._apply_speech_rate()
+        new_backend = self._create_speech_backend()
+        self._controller.set_speech_backend(new_backend)
         self._tts_button.setToolTip(f"Voz: {self._speech.name}")
         self._show_reading_position()
         self._update_status()
-        if was_playing and self._tts_enabled and not self._engine.is_finished:
-            self._speak_current()
 
-    def _on_voice_changed(self, index: int) -> None:
-        if index < 0:
-            return
-        voice_id = self._voice_combo.itemData(index)
-        if not voice_id or voice_id == self._selected_voice_id:
-            return
-
-        self._selected_voice_id = str(voice_id)
-        self._settings.save_tts_voice(self._selected_voice_id)
-        self._reload_speech_backend()
-
-    def _on_tts_toggled(self, enabled: bool) -> None:
-        self._tts_enabled = enabled
-        self._settings.save_tts_enabled(enabled)
-        self._sync_tts_controls()
-        if not enabled:
-            self._speech.stop()
-            if self._playing and not self._engine.is_finished:
-                self._timer.start(self._engine.interval_ms())
-            self._show_reading_position()
-            return
-        self._apply_speech_rate()
-        self._show_reading_position()
-        if self._playing:
-            self._timer.stop()
-            self._speak_current()
-
-    def _uses_phrase_tts(self) -> bool:
-        return self._tts_enabled and self._speech.name.startswith("Piper")
-
-    def _setup_shortcuts(self) -> None:
-        QShortcut(QKeySequence.StandardKey.Open, self, self._open_file)
-        QShortcut(QKeySequence(Qt.Key.Key_Space), self, self._toggle_playback)
-        QShortcut(QKeySequence.StandardKey.Paste, self, self._paste_from_clipboard)
-        QShortcut(QKeySequence(Qt.Key.Key_Left), self, self._previous_word)
-        QShortcut(QKeySequence(Qt.Key.Key_Right), self, self._next_word)
-        QShortcut(QKeySequence(Qt.Key.Key_R), self, self._reset_reading)
-        QShortcut(QKeySequence(Qt.Key.Key_F11), self, self._toggle_fullscreen)
-        QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self._exit_fullscreen)
-        QShortcut(QKeySequence(Qt.Key.Key_Question), self, self._show_shortcuts_help)
-
-    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        for url in event.mimeData().urls():
-            if url.isLocalFile() and is_supported_file(url.toLocalFile()):
-                event.acceptProposedAction()
-                return
-
-    def dropEvent(self, event: QDropEvent) -> None:
-        for url in event.mimeData().urls():
-            if not url.isLocalFile():
-                continue
-            file_path = url.toLocalFile()
-            if is_supported_file(file_path):
-                self._open_file_path(file_path)
-                event.acceptProposedAction()
-                return
-
-    def _show_shortcuts_help(self) -> None:
-        ShortcutsDialog(self).exec()
-
-    def _toggle_fullscreen(self) -> None:
-        if self.isFullScreen():
-            self._exit_fullscreen()
-        else:
-            self._enter_fullscreen()
-
-    def _enter_fullscreen(self) -> None:
-        self._status_label.hide()
-        self._progress_slider.hide()
-        self._controls.hide()
-        self._apply_word_font_size(self._focus_font_size(self._normal_word_point_size))
-        self.showFullScreen()
-
-    def _exit_fullscreen(self) -> None:
-        if not self.isFullScreen():
-            return
-        self.showNormal()
-        self._status_label.show()
-        self._progress_slider.show()
-        self._controls.show()
-        self._apply_word_font_size(self._normal_word_point_size)
-
-    def _paste_from_clipboard(self) -> None:
-        clipboard = ClipboardImporter()
-        text = clipboard.read_text()
-        if not text.strip():
-            self._stop_playback()
-            self._engine.load([])
-            self._show_idle_message()
-            self._update_status()
-            self._play_button.setEnabled(False)
-            self._reset_button.setEnabled(False)
-            return
-
-        self._load_segments(
-            MarkdownImporter().parse(text),
-            source="Clipboard",
-            source_kind="clipboard",
-        )
-
-    def _open_file(self) -> None:
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Open text file",
-            "",
-            "Text files (*.txt *.md *.markdown);;All files (*)",
-        )
-        if not file_path:
-            return
-
-        self._open_file_path(file_path)
-
-    def _open_file_path(self, file_path: str) -> None:
-        try:
-            segments = FileImporter().read(file_path)
-        except OSError:
-            self._set_plain_message("Could not read file")
-            return
-        self._load_segments(segments, source=file_path, source_kind="file")
-
-    def _load_segments(
-        self,
-        segments,
-        source: str | None = None,
-        source_kind: str | None = None,
-        resume_position: int | None = None,
-    ) -> None:
-        self._stop_playback()
-        self._source_path = source if source_kind == "file" else None
-        self._source_kind = source_kind
-        self._engine.load(segments)
-        if self._engine.is_empty:
-            self._set_plain_message("No readable text found")
-            self._play_button.setEnabled(False)
-            self._reset_button.setEnabled(False)
-        else:
-            if resume_position is not None:
-                self._engine.seek(resume_position)
-            else:
-                self._engine.reset()
-            self._show_reading_position()
-            self._play_button.setEnabled(True)
-            self._reset_button.setEnabled(True)
-        self._sync_progress_slider()
-        self._update_status()
-        self._update_window_title(source)
+    # ------------------------------------------------------------------
+    # Reading session (file persistence)
+    # ------------------------------------------------------------------
 
     def _restore_reading_session(self) -> None:
         session = self._settings.load_reading_session()
@@ -477,248 +563,95 @@ class MainWindow(QMainWindow):
 
         self._settings.save_reading_session(self._source_path, position)
 
-    def _update_window_title(self, source: str | None = None) -> None:
-        if source:
-            self.setWindowTitle(f"Speedreader — {source}")
-        else:
-            self.setWindowTitle("Speedreader")
+    # ------------------------------------------------------------------
+    # File / Clipboard loading
+    # ------------------------------------------------------------------
 
-    def _toggle_playback(self) -> None:
-        if self._playing:
-            self._stop_playback()
+    def _paste_from_clipboard(self) -> None:
+        clipboard = ClipboardImporter()
+        text = clipboard.read_text()
+        if not text.strip():
+            self._controller.stop()
+            self._controller.load([])
+            self._show_idle_message()
+            self._play_button.setEnabled(False)
+            self._reset_button.setEnabled(False)
             return
-        if self._engine.is_finished:
-            self._engine.reset()
-        self._playing = True
-        self._play_button.setText("Pause")
-        if self._tts_enabled:
-            self._speak_current()
-        else:
-            self._timer.start(self._engine.interval_ms())
-            self._show_reading_position()
 
-    def _stop_playback(self) -> None:
-        self._playing = False
-        self._timer.stop()
-        self._stop_phrase_visual_timer()
-        self._speech.stop()
-        self._play_button.setText("Play")
+        self._load_segments(
+            MarkdownImporter().parse(text),
+            source="Clipboard",
+            source_kind="clipboard",
+        )
 
-    def _stop_phrase_visual_timer(self) -> None:
-        self._phrase_timer.stop()
-        self._phrase_word_offset = 0
+    def _open_file(self) -> None:
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open text file",
+            "",
+            "Text files (*.txt *.md *.markdown);;All files (*)",
+        )
+        if not file_path:
+            return
+        self._open_file_path(file_path)
 
-    def _display_position(self) -> int:
-        if self._phrase_timer.isActive():
-            return self._engine.position + self._phrase_word_offset
-        return self._engine.position
+    def _open_file_path(self, file_path: str) -> None:
+        try:
+            segments = FileImporter().read(file_path)
+        except OSError:
+            self._set_plain_message("Could not read file")
+            return
+        self._load_segments(segments, source=file_path, source_kind="file")
 
-    def _should_skip_tts_for_current_unit(self) -> bool:
-        return self._engine.current_segment_kind == SegmentKind.CODE_BLOCK
-
-    def _speak_current(self) -> None:
-        if self._uses_phrase_tts():
-            self._speak_current_phrase()
-        else:
-            self._speak_current_word()
-
-    def _speak_current_word(self) -> None:
-        if not self._playing:
-            return
-        if self._engine.is_finished:
-            self._stop_playback()
-            self._set_plain_message("Done")
-            return
-        self._show_current_word()
-        if self._should_skip_tts_for_current_unit():
-            self._on_speech_finished()
-            return
-        word = self._engine.current_word
-        if not word:
-            self._on_speech_finished()
-            return
-        self._apply_speech_rate()
-        self._speech.speak(word)
-
-    def _speak_current_phrase(self) -> None:
-        if not self._playing:
-            return
-        if self._engine.is_finished:
-            self._stop_playback()
-            self._set_plain_message("Done")
-            return
-        if self._should_skip_tts_for_current_unit():
-            self._on_speech_finished()
-            return
-        phrase = self._engine.current_phrase_text()
-        if not phrase:
-            self._on_speech_finished()
-            return
-        self._phrase_word_offset = 0
-        self._show_phrase_word_at_offset(0)
-        self._apply_speech_rate()
-        self._speech.speak(phrase)
-        self._phrase_timer.start(self._engine.interval_ms_at(self._engine.position))
-
-    def _on_phrase_visual_tick(self) -> None:
-        phrase_end = self._engine.phrase_end_position()
-        next_index = self._engine.position + self._phrase_word_offset + 1
-        if next_index >= phrase_end:
-            self._phrase_timer.stop()
-            return
-        self._phrase_word_offset += 1
-        self._show_phrase_word_at_offset(self._phrase_word_offset)
-        self._update_status()
-        self._phrase_timer.setInterval(self._engine.interval_ms_at(next_index))
-
-    def _on_speech_finished(self) -> None:
-        if not self._playing or not self._tts_enabled:
-            return
-        self._stop_phrase_visual_timer()
-        if self._uses_phrase_tts():
-            self._engine.advance_phrase()
-        else:
-            self._engine.advance()
-        self._update_status()
-        if self._engine.is_finished:
-            self._stop_playback()
-            self._set_plain_message("Done")
-            return
-        self._speak_current()
-
-    def _reset_reading(self) -> None:
-        self._stop_playback()
-        self._engine.reset()
-        self._show_reading_position()
-        self._update_status()
-
-    def _previous_word(self) -> None:
+    def _load_segments(
+        self,
+        segments,
+        source: str | None = None,
+        source_kind: str | None = None,
+        resume_position: int | None = None,
+    ) -> None:
+        self._controller.load(segments, source, source_kind, resume_position)
         if self._engine.is_empty:
-            return
-        self._stop_playback()
-        if self._uses_phrase_tts():
-            self._engine.retreat_phrase()
+            self._set_plain_message("No readable text found")
+            self._play_button.setEnabled(False)
+            self._reset_button.setEnabled(False)
         else:
-            self._engine.retreat()
-        self._show_reading_position()
+            if resume_position is None:
+                self._show_reading_position()
+            self._play_button.setEnabled(True)
+            self._reset_button.setEnabled(True)
+        self._sync_progress_slider()
         self._update_status()
+        self._update_window_title(source)
 
-    def _next_word(self) -> None:
-        if self._engine.is_empty or self._engine.is_finished:
-            return
-        self._stop_playback()
-        if self._uses_phrase_tts():
-            self._engine.advance_to_next_phrase()
-        else:
-            self._engine.advance()
-        if self._engine.is_finished:
-            self._set_plain_message("Done")
-        else:
-            self._show_reading_position()
-        self._update_status()
-
-    def _on_tick(self) -> None:
-        if self._tts_enabled:
-            return
-        self._engine.advance()
-        self._update_status()
-        if self._engine.is_finished:
-            self._stop_playback()
-            self._set_plain_message("Done")
-            return
-        self._show_reading_position()
-        self._timer.setInterval(self._engine.interval_ms())
-
-    def _on_wpm_changed(self, value: int) -> None:
-        snapped = snap_wpm(value)
-        if snapped != value:
-            self._wpm_slider.blockSignals(True)
-            self._wpm_slider.setValue(snapped)
-            self._wpm_slider.blockSignals(False)
-            value = snapped
-        self._engine.wpm = value
-        self._wpm_label.setText(self._format_rsvp_wpm_label())
-        self._settings.save_wpm(value)
-        self._update_status()
-        if self._playing and not self._tts_enabled:
-            self._timer.setInterval(self._engine.interval_ms())
-
-    def _on_tts_wpm_changed(self, value: int) -> None:
-        snapped = snap_wpm(value)
-        if snapped != value:
-            self._tts_wpm_slider.blockSignals(True)
-            self._tts_wpm_slider.setValue(snapped)
-            self._tts_wpm_slider.blockSignals(False)
-            value = snapped
-        self._tts_wpm = value
-        self._tts_wpm_label.setText(self._format_tts_wpm_label())
-        self._settings.save_tts_wpm(value)
-        self._apply_speech_rate()
-        self._update_status()
-
-    def _on_font_size_changed(self, value: int) -> None:
-        self._normal_word_point_size = value
-        self._font_label.setText(f"{value} pt")
-        self._settings.save_font_size(value)
-        if self.isFullScreen():
-            self._apply_word_font_size(self._focus_font_size(value))
-        else:
-            self._apply_word_font_size(value)
-
-    def _focus_font_size(self, normal_size: int) -> int:
-        return min(normal_size + 14, MAX_FONT_SIZE + 14)
-
-    def _apply_word_font_size(self, point_size: int) -> None:
-        word_font = self._word_label.font()
-        word_font.setPointSize(point_size)
-        word_font.setBold(True)
-        self._word_label.setFont(word_font)
-
-    def _set_plain_message(self, message: str) -> None:
-        self._word_label.setTextFormat(Qt.TextFormat.PlainText)
-        self._word_label.setText(message)
+    # ------------------------------------------------------------------
+    # Display updates
+    # ------------------------------------------------------------------
 
     def _show_reading_position(self) -> None:
-        if self._uses_phrase_tts() and self._phrase_timer.isActive():
-            self._show_phrase_word_at_offset(self._phrase_word_offset)
-        elif self._uses_phrase_tts():
-            self._show_current_phrase()
-        else:
-            self._show_current_word()
-
-    def _show_phrase_word_at_offset(self, offset: int) -> None:
-        token = self._engine.token_at(self._engine.position + offset)
-        if token is None:
-            self._set_plain_message("Done")
-            return
-        self._word_label.setWordWrap(False)
-        self._word_label.setTextFormat(Qt.TextFormat.RichText)
-        self._word_label.setText(format_word_with_orp(token.text))
-
-    def _show_current_phrase(self) -> None:
-        phrase = self._engine.current_phrase_text()
-        if phrase is None:
-            self._set_plain_message("Done")
-            return
-        self._word_label.setWordWrap(True)
-        self._set_plain_message(phrase)
-
-    def _show_current_word(self) -> None:
-        self._word_label.setWordWrap(False)
+        """Update the word label to reflect the current engine position."""
+        if self._uses_phrase_tts():
+            if self._controller._phrase_timer.isActive():  # type: ignore[attr]
+                token = self._engine.token_at(
+                    self._engine.position + self._controller._phrase_word_offset  # type: ignore[attr]
+                )
+                if token is not None:
+                    self._word_label.setWordWrap(False)
+                    self._word_label.setTextFormat(Qt.TextFormat.RichText)
+                    self._word_label.setText(format_word_with_orp(token.text))
+                    return
+            phrase = self._engine.current_phrase_text()
+            if phrase is not None:
+                self._word_label.setWordWrap(True)
+                self._set_plain_message(phrase)
+                return
         word = self._engine.current_word
-        if word is None:
+        if word is not None:
+            self._word_label.setWordWrap(False)
+            self._word_label.setTextFormat(Qt.TextFormat.RichText)
+            self._word_label.setText(format_word_with_orp(word))
+        else:
             self._set_plain_message("Done")
-            return
-        self._word_label.setTextFormat(Qt.TextFormat.RichText)
-        self._word_label.setText(format_word_with_orp(word))
-
-    def _on_progress_changed(self, value: int) -> None:
-        if not self._progress_slider.isSliderDown():
-            return
-        self._stop_playback()
-        self._engine.seek(value)
-        self._show_reading_position()
-        self._update_status()
 
     def _sync_progress_slider(self) -> None:
         total = self._engine.word_count
@@ -763,3 +696,88 @@ class MainWindow(QMainWindow):
         else:
             parts.append("RSVP")
         return " · ".join(parts)
+
+    # ------------------------------------------------------------------
+    # Fullscreen
+    # ------------------------------------------------------------------
+
+    def _toggle_fullscreen(self) -> None:
+        if self.isFullScreen():
+            self._exit_fullscreen()
+        else:
+            self._enter_fullscreen()
+
+    def _enter_fullscreen(self) -> None:
+        self._status_label.hide()
+        self._progress_slider.hide()
+        self._controls.hide()
+        self._apply_word_font_size(self._focus_font_size(self._normal_word_point_size))
+        self.showFullScreen()
+
+    def _exit_fullscreen(self) -> None:
+        if not self.isFullScreen():
+            return
+        self.showNormal()
+        self._status_label.show()
+        self._progress_slider.show()
+        self._controls.show()
+        self._apply_word_font_size(self._normal_word_point_size)
+
+    # ------------------------------------------------------------------
+    # Close / Persist
+    # ------------------------------------------------------------------
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self._settings.save_wpm(self._engine.wpm)
+        self._settings.save_tts_wpm(self._tts_wpm)
+        self._settings.save_font_size(self._normal_word_point_size)
+        self._settings.save_tts_enabled(self._tts_enabled)
+        self._settings.save_tts_voice(self._selected_voice_id)
+        self._settings.save_reading_profile(self._engine.profile_id)
+        self._persist_reading_session()
+        self._speech.stop()
+        super().closeEvent(event)
+
+    # ------------------------------------------------------------------
+    # Drag / Drop
+    # ------------------------------------------------------------------
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        for url in event.mimeData().urls():
+            if url.isLocalFile() and is_supported_file(url.toLocalFile()):
+                event.acceptProposedAction()
+                return
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        for url in event.mimeData().urls():
+            if not url.isLocalFile():
+                continue
+            file_path = url.toLocalFile()
+            if is_supported_file(file_path):
+                self._open_file_path(file_path)
+                event.acceptProposedAction()
+                return
+
+    # ------------------------------------------------------------------
+    # Shortcuts
+    # ------------------------------------------------------------------
+
+    def _setup_shortcuts(self) -> None:
+        QShortcut(QKeySequence.StandardKey.Open, self, self._open_file)
+        QShortcut(QKeySequence(Qt.Key.Key_Space), self, self._on_play_clicked)
+        QShortcut(QKeySequence.StandardKey.Paste, self, self._paste_from_clipboard)
+        QShortcut(QKeySequence(Qt.Key.Key_Left), self, self._previous_word)
+        QShortcut(QKeySequence(Qt.Key.Key_Right), self, self._next_word)
+        QShortcut(QKeySequence(Qt.Key.Key_R), self, self._reset_reading)
+        QShortcut(QKeySequence(Qt.Key.Key_F11), self, self._toggle_fullscreen)
+        QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self._exit_fullscreen)
+        QShortcut(QKeySequence(Qt.Key.Key_Question), self, self._show_shortcuts_help)
+
+    def _show_shortcuts_help(self) -> None:
+        ShortcutsDialog(self).exec()
+
+    def _update_window_title(self, source: str | None = None) -> None:
+        if source:
+            self.setWindowTitle(f"Speedreader — {source}")
+        else:
+            self.setWindowTitle("Speedreader")

@@ -37,21 +37,21 @@ Chain strategy: pending
 
 ## Commit 3: `feat(cli): add speedreader-cli` (~280 lines)
 
-- [ ] 3.1 [RED] Write `tests/cli/test_cli.py` — arg parsing, file/RSVP display, missing-file error, no PySide6
-- [ ] 3.2 [RED] Write `tests/cli/test_cli_settings.py` — JsonSettingsStore persist/load
-- [ ] 3.3 [GREEN] Create `cli/settings.py` — JsonSettingsStore(SettingsProtocol)
-- [ ] 3.4 [GREEN] Create `cli/reader.py` — RSVP loop with ORP ANSI highlighting
-- [ ] 3.5 [GREEN] Create `cli/main.py` — typer app (`read <file> --wpm`, stdin support)
-- [ ] 3.6 [GREEN] Add `speedreader-cli` script entry to `pyproject.toml`
-- [ ] 3.7 Verify `speedreader-cli read --wpm 60`; `pytest tests/cli/` passes
+- [x] 3.1 [RED] Write `tests/cli/test_cli.py` — arg parsing, file/RSVP display, missing-file error, no PySide6
+- [x] 3.2 [RED] Write `tests/cli/test_cli_settings.py` — JsonSettingsStore persist/load
+- [x] 3.3 [GREEN] Create `cli/settings.py` — JsonSettingsStore(SettingsProtocol)
+- [x] 3.4 [GREEN] Create `cli/reader.py` — RSVP loop with ORP ANSI highlighting
+- [x] 3.5 [GREEN] Create `cli/main.py` — typer app (`read <file> --wpm`, stdin support)
+- [x] 3.6 [GREEN] Add `speedreader-cli` script entry to `pyproject.toml`
+- [x] 3.7 Verify `speedreader-cli read --wpm 60`; `pytest tests/cli/` passes
 
 ## Commit 4: `refactor(gui): split playback state into ReadingController` (~1445 lines)
 
-- [ ] 4.1 [RED] Write `tests/gui/test_reading_controller.py` — isolated controller, mock callbacks, play/pause/seek/signals
-- [ ] 4.2 [RED] Write `tests/gui/test_controller_view_integration.py` — MainWindow reacts to controller signals
-- [ ] 4.3 [GREEN] Create `ui/reading_controller.py` — QObject with word_changed/status_changed/finished/progress_changed signals; owns engine, timers, SpeechBackend
-- [ ] 4.4 [REFACTOR] Rewrite `ui/main_window.py` — thin view: widgets, layout, drag-drop, shortcuts only; emits play_requested/pause_requested
-- [ ] 4.5 Verify GUI launches; play/pause/seek works; `pytest tests/gui/` passes
+- [x] 4.1 [RED] Write `tests/gui/test_reading_controller.py` — isolated controller, mock callbacks, play/pause/seek/signals
+- [x] 4.2 [RED] Write `tests/gui/test_controller_view_integration.py` — MainWindow reacts to controller signals
+- [x] 4.3 [GREEN] Create `ui/reading_controller.py` — QObject with word_changed/status_changed/finished/progress_changed signals; owns engine, timers, SpeechBackend
+- [x] 4.4 [REFACTOR] Rewrite `ui/main_window.py` — thin view: widgets, layout, drag-drop, shortcuts only; emits play_requested/pause_requested
+- [x] 4.5 Verify GUI launches; play/pause/seek works; `pytest tests/gui/` passes
 
 ## Commit 5: `perf(tts): move Piper synthesis off main thread` (~424 lines)
 
