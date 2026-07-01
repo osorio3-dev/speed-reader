@@ -7,8 +7,13 @@ import sys
 import time
 from typing import Optional
 
+import colorama
+
 from speedreader.core.engine import ReadingEngine
 from speedreader.core.orp import optimal_recognition_index
+
+
+colorama.init()
 
 
 def format_word_ansi(word: str) -> str:

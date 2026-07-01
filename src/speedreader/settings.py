@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from platformdirs import user_data_dir
 from PySide6.QtCore import QSettings
 
 from speedreader.core.protocols import SettingsProtocol
@@ -34,7 +35,7 @@ _TTS_BACKEND_KEY = "tts/backend"
 _TTS_VOICES_DIR_KEY = "tts/voices_dir"
 _TTS_VOICE_KEY = "tts/voice"
 _READING_PROFILE_KEY = "reading/profile"
-DEFAULT_VOICES_DIR = Path.home() / ".local" / "share" / "speedreader" / "voices"
+DEFAULT_VOICES_DIR = Path(user_data_dir("speedreader")) / "voices"
 
 
 @dataclass(frozen=True)

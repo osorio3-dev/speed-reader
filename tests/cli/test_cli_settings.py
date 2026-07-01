@@ -81,11 +81,12 @@ def test_corrupt_json_uses_defaults(tmp_path: Path) -> None:
 
 
 def test_default_config_path() -> None:
-    """JsonSettingsStore uses ~/.config/speedreader/cli-settings.json by default."""
+    """JsonSettingsStore uses platformdirs config path by default."""
     from speedreader.cli.settings import DEFAULT_CONFIG_PATH, JsonSettingsStore
 
     store = JsonSettingsStore()
-    assert str(store.path).endswith(".config/speedreader/cli-settings.json")
+    assert store.path.name == "cli-settings.json"
+    assert store.path.parent.name == "speedreader"
     assert isinstance(store.path, Path)
 
 

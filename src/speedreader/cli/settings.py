@@ -6,7 +6,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-DEFAULT_CONFIG_DIR = Path.home() / ".config" / "speedreader"
+from platformdirs import user_config_dir
+
+DEFAULT_CONFIG_DIR = Path(user_config_dir("speedreader"))
 DEFAULT_CONFIG_PATH = DEFAULT_CONFIG_DIR / "cli-settings.json"
 
 
