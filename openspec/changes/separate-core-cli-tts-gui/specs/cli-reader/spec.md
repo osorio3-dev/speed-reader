@@ -14,23 +14,23 @@ Add a `speedreader-cli` entry point using `typer` that renders RSVP output in th
 
 ### Requirement: CLI Entry Point
 
-A `speedreader-cli` console script MUST be registered in `pyproject.toml` under `[project.scripts]`. The command `speedreader-cli read <file>` MUST start RSVP display.
+A `speedreader-cli` console script MUST be registered in `pyproject.toml` under `[project.scripts]`. The command `speedreader-cli <file>` MUST start RSVP display.
 
 #### Scenario: CLI shows ORP-highlighted words
 
 - GIVEN a text file with content `"Hello world"`
-- WHEN running `speedreader-cli read /tmp/test.txt --wpm 60`
+- WHEN running `speedreader-cli /tmp/test.txt --wpm 60`
 - THEN the terminal displays each word with its ORP letter highlighted, advancing at the configured WPM
 
 #### Scenario: CLI reads from stdin
 
-- GIVEN piped input `echo "Hello world" | speedreader-cli read --wpm 60`
+- GIVEN piped input `echo "Hello world" | speedreader-cli --wpm 60`
 - THEN the input is parsed and displayed as RSVP
 
 #### Scenario: CLI fails gracefully on missing file
 
 - GIVEN a non-existent file path
-- WHEN running `speedreader-cli read /no/such/file`
+- WHEN running `speedreader-cli /no/such/file`
 - THEN a non-zero exit code is returned and a clear error message is printed to stderr
 
 ### Requirement: Visual-Only Reading
@@ -50,7 +50,7 @@ The CLI MUST store settings via a `SettingsProtocol` implementation (e.g., JSON 
 #### Scenario: Settings persist between CLI sessions
 
 - GIVEN a user sets WPM to 300 via settings file
-- WHEN launching `speedreader-cli read file.txt`
+- WHEN launching `speedreader-cli file.txt`
 - THEN the displayed WPM starts at 300
 
 ## Test Expectations
