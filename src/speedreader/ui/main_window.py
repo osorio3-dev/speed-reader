@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from speedreader.core.protocols import ClipboardProtocol
 from speedreader.engine import ReadingEngine
 from speedreader.importers.clipboard import ClipboardImporter
 from speedreader.importers.file import FileImporter, is_supported_file
@@ -49,6 +50,14 @@ from speedreader.ui.shortcuts_dialog import ShortcutsDialog
 
 IDLE_MESSAGE = "-- Speedreader --"
 IDLE_HINT = "Pega, abre (Ctrl+O) o arrastra un .txt / .md"
+
+
+def _default_clipboard() -> ClipboardProtocol:
+    """Return the Qt application clipboard, creating a QApplication if needed."""
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    return app.clipboard()
 
 
 class MainWindow(QMainWindow):
@@ -568,7 +577,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _paste_from_clipboard(self) -> None:
-        clipboard = ClipboardImporter()
+        clipboard = ClipboardImporter(clipboard=_default_clipboard())
         text = clipboard.read_text()
         if not text.strip():
             self._controller.stop()

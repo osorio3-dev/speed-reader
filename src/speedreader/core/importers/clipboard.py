@@ -8,15 +8,11 @@ from speedreader.core.protocols import ClipboardProtocol
 
 
 class ClipboardImporter:
-    """Read text from the system clipboard and convert it to TextSegments.
-
-    A clipboard-like object can be injected for testing.  If none is provided,
-    PySide6's QClipboard is used.
-    """
+    """Read text from an injected clipboard and convert it to TextSegments."""
 
     def __init__(
         self,
-        clipboard: Optional[ClipboardProtocol] = None,
+        clipboard: ClipboardProtocol,
         text_importer: Optional[PlainTextImporter] = None,
     ) -> None:
         self._clipboard = clipboard
@@ -31,11 +27,4 @@ class ClipboardImporter:
 
     def read_text(self) -> str:
         """Return the raw clipboard text."""
-        clipboard = self._clipboard or self._default_clipboard()
-        return clipboard.text()
-
-    def _default_clipboard(self) -> ClipboardProtocol:
-        from PySide6.QtWidgets import QApplication
-
-        app = QApplication.instance() or QApplication([])
-        return app.clipboard()
+        return self._clipboard.text()
