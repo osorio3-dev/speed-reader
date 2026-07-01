@@ -155,7 +155,8 @@ class ReadingController(QObject):
             self._speak_current()
         else:
             self._timer.start(self._engine.interval_ms())
-        self._emit_word()
+        if not self._tts_enabled:
+            self._emit_word()
         self.status_changed.emit("playing")
 
     def pause(self) -> None:

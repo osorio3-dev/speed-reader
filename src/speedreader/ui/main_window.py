@@ -616,8 +616,7 @@ class MainWindow(QMainWindow):
             self._play_button.setEnabled(False)
             self._reset_button.setEnabled(False)
         else:
-            if resume_position is None:
-                self._show_reading_position()
+            self._show_reading_position()
             self._play_button.setEnabled(True)
             self._reset_button.setEnabled(True)
         self._sync_progress_slider()
