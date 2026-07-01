@@ -55,7 +55,7 @@ Chain strategy: pending
 
 ## Commit 5: `perf(tts): move Piper synthesis off main thread` (~424 lines)
 
-- [ ] 5.1 [RED] Write `tests/gui/test_tts_threading.py` — mock PiperVoice, verify worker emits audio_ready; stop cancels
-- [ ] 5.2 [GREEN] Extract `PiperWorker(QObject)` in `piper_backend.py` — signals: audio_ready; slots: do_synthesize, abort
-- [ ] 5.3 [GREEN] Modify `PiperSpeechBackend` — owns QThread+worker; speak() emits queued signal; generation counter discards stale audio; finished_callback via signal bridge
-- [ ] 5.4 Verify `pytest tests/gui/test_tts_threading.py`; `test_speech.py` unchanged
+- [x] 5.1 [RED] Write `tests/gui/test_tts_threading.py` — mock PiperVoice, verify worker emits audio_ready; stop cancels
+- [x] 5.2 [GREEN] Extract `PiperWorker(QObject)` in `piper_backend.py` — signals: audio_ready; slots: do_synthesize, abort
+- [x] 5.3 [GREEN] Modify `PiperSpeechBackend` — owns QThread+worker; speak() emits queued signal; generation counter discards stale audio; finished_callback via signal bridge
+- [x] 5.4 Verify `pytest tests/gui/test_tts_threading.py`; `test_speech.py` unchanged
