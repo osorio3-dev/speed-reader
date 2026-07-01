@@ -23,6 +23,7 @@ tts = [
 
 [project.scripts]
 speedreader = "speedreader.app:main"
+speedreader-cli = "speedreader.cli.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
