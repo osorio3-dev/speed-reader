@@ -1,4 +1,4 @@
-"""Piper voice discovery and selection helpers."""
+"""Voice discovery and selection helpers for Piper, Edge, and Azure."""
 
 from __future__ import annotations
 
@@ -16,6 +16,24 @@ PREFERRED_VOICES = (
     "es_ES-sharvard-medium",
 )
 
+EDGE_VOICE_PREFIX = "edge:"
+AZURE_VOICE_PREFIX = "azure:"
+
+EDGE_PREFERRED_VOICES = (
+    "es-ES-ElviraNeural",
+    "es-ES-XimenaNeural",
+    "es-MX-JuanNeural",
+    "es-US-AriaNeural",
+)
+
+AZURE_VOICES_AVAILABLE = (
+    "es-ES-ElviraNeural",
+    "es-ES-XimenaNeural",
+    "es-MX-JuanNeural",
+    "es-MX-DaliaNeural",
+    "es-US-AriaNeural",
+)
+
 VOICE_LABELS: dict[str, str] = {
     QT_VOICE_ID: "Qt / eSpeak (sistema)",
     DEFAULT_PIPER_VOICE: "Español MX — ligera (~20 MB)",
@@ -26,11 +44,34 @@ VOICE_LABELS: dict[str, str] = {
     "es_ES-carlfm-x_low": "Español ES — ligera (~27 MB)",
 }
 
+EDGE_VOICE_LABELS: dict[str, str] = {
+    f"{EDGE_VOICE_PREFIX}es-ES-ElviraNeural": "Edge · Elvira (ES, online)",
+    f"{EDGE_VOICE_PREFIX}es-ES-XimenaNeural": "Edge · Ximena (ES, online)",
+    f"{EDGE_VOICE_PREFIX}es-MX-JuanNeural": "Edge · Juan (MX, online)",
+    f"{EDGE_VOICE_PREFIX}es-US-AriaNeural": "Edge · Aria (US, online)",
+}
+
+AZURE_VOICE_LABELS: dict[str, str] = {
+    f"{AZURE_VOICE_PREFIX}es-ES-ElviraNeural": "Azure · Elvira (ES, online)",
+    f"{AZURE_VOICE_PREFIX}es-ES-XimenaNeural": "Azure · Ximena (ES, online)",
+    f"{AZURE_VOICE_PREFIX}es-MX-JuanNeural": "Azure · Juan (MX, online)",
+    f"{AZURE_VOICE_PREFIX}es-MX-DaliaNeural": "Azure · Dalia (MX, online)",
+    f"{AZURE_VOICE_PREFIX}es-US-AriaNeural": "Azure · Aria (US, online)",
+}
+
 
 def voice_label(voice_id: str) -> str:
     """Return a human-readable label for a voice id."""
     if voice_id == QT_VOICE_ID:
         return VOICE_LABELS[QT_VOICE_ID]
+    if voice_id.startswith(EDGE_VOICE_PREFIX):
+        if voice_id in EDGE_VOICE_LABELS:
+            return EDGE_VOICE_LABELS[voice_id]
+        return f"Edge · {voice_id.removeprefix(EDGE_VOICE_PREFIX)}"
+    if voice_id.startswith(AZURE_VOICE_PREFIX):
+        if voice_id in AZURE_VOICE_LABELS:
+            return AZURE_VOICE_LABELS[voice_id]
+        return f"Azure · {voice_id.removeprefix(AZURE_VOICE_PREFIX)}"
     return VOICE_LABELS.get(voice_id, voice_id)
 
 
@@ -45,6 +86,16 @@ def list_installed_piper_voices(voices_dir: Path) -> list[str]:
         if voice_id not in ordered:
             ordered.append(voice_id)
     return ordered
+
+
+def list_available_edge_voices() -> list[str]:
+    """Return the static list of Edge voice ids surfaced in the UI."""
+    return [f"{EDGE_VOICE_PREFIX}{voice}" for voice in EDGE_PREFERRED_VOICES]
+
+
+def list_available_azure_voices() -> list[str]:
+    """Return the static list of Azure voice ids surfaced in the UI."""
+    return [f"{AZURE_VOICE_PREFIX}{voice}" for voice in AZURE_VOICES_AVAILABLE]
 
 
 def resolve_piper_model(
@@ -68,6 +119,26 @@ def resolve_piper_model(
     return None
 
 
+def resolve_edge_voice(saved_id: Optional[str]) -> Optional[str]:
+    """Return the matched Edge voice id (without prefix) or the first default."""
+    if saved_id is None:
+        return EDGE_PREFERRED_VOICES[0]
+    bare = saved_id.removeprefix(EDGE_VOICE_PREFIX)
+    if bare in EDGE_PREFERRED_VOICES:
+        return bare
+    return EDGE_PREFERRED_VOICES[0]
+
+
+def resolve_azure_voice(saved_id: Optional[str]) -> Optional[str]:
+    """Return the matched Azure voice id (without prefix) or the first default."""
+    if saved_id is None:
+        return AZURE_VOICES_AVAILABLE[0]
+    bare = saved_id.removeprefix(AZURE_VOICE_PREFIX)
+    if bare in AZURE_VOICES_AVAILABLE:
+        return bare
+    return AZURE_VOICES_AVAILABLE[0]
+
+
 def resolve_voice_selection(
     voices_dir: Path,
     saved_voice_id: str,
@@ -76,6 +147,11 @@ def resolve_voice_selection(
     """Pick the voice id to use from settings and installed models."""
     if saved_voice_id == QT_VOICE_ID:
         return QT_VOICE_ID
+
+    if saved_voice_id.startswith(EDGE_VOICE_PREFIX):
+        return saved_voice_id
+    if saved_voice_id.startswith(AZURE_VOICE_PREFIX):
+        return saved_voice_id
 
     installed_list = list(installed or list_installed_piper_voices(voices_dir))
     if saved_voice_id in installed_list:

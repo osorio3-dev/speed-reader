@@ -15,6 +15,7 @@ PiperWorker(QObject)
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -30,6 +31,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtMultimedia import QAudio, QAudioFormat, QAudioSink, QMediaDevices
 
+from speedreader.core.speech import SpeechCapabilities
 from speedreader.speech.rate import wpm_to_length_scale
 from speedreader.speech.voices import resolve_piper_model
 
@@ -116,6 +118,7 @@ class PiperSpeechBackend(QObject):
         self._voice = PiperVoice.load(str(model_path))
         self._model_path = model_path
         self._finished_callback: Optional[Callable[[], None]] = None
+        self._audio_started_callback: Optional[Callable[[], None]] = None
         self._length_scale = 1.0
         self._audio_sink: Optional[QAudioSink] = None
         self._audio_buffer: Optional[QBuffer] = None
@@ -145,11 +148,25 @@ class PiperSpeechBackend(QObject):
     def name(self) -> str:
         return f"Piper ({self._model_path.stem})"
 
+    @property
+    def capabilities(self) -> SpeechCapabilities:
+        return SpeechCapabilities(
+            phrase_sync=True,
+            streaming=True,
+            needs_key=False,
+            max_chars_per_speak=None,
+        )
+
     def set_rate_from_wpm(self, wpm: int, pace_multiplier: float = 1.0) -> None:
         self._length_scale = wpm_to_length_scale(wpm, pace_multiplier=pace_multiplier)
 
     def set_finished_callback(self, callback: Optional[Callable[[], None]]) -> None:
         self._finished_callback = callback
+
+    def set_audio_started_callback(
+        self, callback: Optional[Callable[[], None]]
+    ) -> None:
+        self._audio_started_callback = callback
 
     def speak(self, text: str) -> None:
         """Enqueue *text* for synthesis on the worker thread.
@@ -238,7 +255,10 @@ class PiperSpeechBackend(QObject):
         if self._playback_generation != self._generation:
             return
         if state == QAudio.State.ActiveState:
-            self._heard_active = True
+            if not self._heard_active:
+                self._heard_active = True
+                if self._audio_started_callback is not None:
+                    self._audio_started_callback()
             return
         if state != QAudio.State.IdleState or not self._heard_active:
             return
@@ -273,4 +293,13 @@ class PiperSpeechBackend(QObject):
             pass
 
     def __del__(self) -> None:
-        self._cleanup_thread()
+        try:
+            if sys.is_finalizing():
+                return
+        except AttributeError:
+            # Older Python versions without sys.is_finalizing: best-effort.
+            pass
+        try:
+            self._cleanup_thread()
+        except Exception:
+            pass

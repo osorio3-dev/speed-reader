@@ -41,12 +41,17 @@ from speedreader.speech.base import SpeechBackend
 from speedreader.speech.factory import create_speech_backend
 from speedreader.speech.voices import (
     QT_VOICE_ID,
+    list_available_azure_voices,
+    list_available_edge_voices,
     list_installed_piper_voices,
     resolve_voice_selection,
     voice_label,
 )
+from speedreader.ui.azure_key_dialog import AzureKeyDialog
 from speedreader.ui.reading_controller import ReadingController
 from speedreader.ui.shortcuts_dialog import ShortcutsDialog
+
+from speedreader.settings import get_azure_key
 
 IDLE_MESSAGE = "-- Speedreader --"
 IDLE_HINT = "Pega, abre (Ctrl+O) o arrastra un .txt / .md"
@@ -151,6 +156,10 @@ class MainWindow(QMainWindow):
         self._voice_combo.currentIndexChanged.connect(self._on_voice_changed)
         self._refresh_voice_combo()
 
+        self._keys_button = QPushButton("Voces TTS")
+        self._keys_button.setToolTip("Configurar claves de TTS online (Edge / Azure)")
+        self._keys_button.clicked.connect(self._open_keys_dialog)
+
         self._wpm_slider = QSlider(Qt.Orientation.Horizontal)
         self._wpm_slider.setRange(MIN_WPM, MAX_WPM)
         self._wpm_slider.setSingleStep(WPM_STEP)
@@ -198,6 +207,7 @@ class MainWindow(QMainWindow):
         controls.addWidget(self._reset_button)
         controls.addWidget(self._tts_button)
         controls.addWidget(self._voice_combo)
+        controls.addWidget(self._keys_button)
         controls.addStretch()
 
         tuning = QVBoxLayout()
@@ -515,10 +525,21 @@ class MainWindow(QMainWindow):
             installed=installed,
         )
 
+        edge_voices = list_available_edge_voices()
+        azure_voices = list_available_azure_voices()
+        azure_unlocked = get_azure_key() is not None
+
         self._voice_combo.blockSignals(True)
         self._voice_combo.clear()
         for voice_id in installed:
             self._voice_combo.addItem(voice_label(voice_id), voice_id)
+        for voice_id in edge_voices:
+            self._voice_combo.addItem(voice_label(voice_id), voice_id)
+        for voice_id in azure_voices:
+            label = voice_label(voice_id)
+            if not azure_unlocked:
+                label = f"{label} [locked]"
+            self._voice_combo.addItem(label, voice_id)
         self._voice_combo.addItem(voice_label(QT_VOICE_ID), QT_VOICE_ID)
 
         index = self._voice_combo.findData(self._selected_voice_id)
@@ -528,7 +549,12 @@ class MainWindow(QMainWindow):
         self._voice_combo.blockSignals(False)
 
         self._selected_voice_id = str(self._voice_combo.currentData())
-        self._tts_button.setToolTip(f"Voz: {self._speech.name}")
+        if self._selected_voice_id.startswith("azure:") and not azure_unlocked:
+            self._tts_button.setToolTip(
+                "Falta API key: clic para configurar (botón Voces TTS)"
+            )
+        else:
+            self._tts_button.setToolTip(f"Voz: {self._speech.name}")
 
     def _reload_speech_backend(self) -> None:
         was_playing = self._playing
@@ -537,6 +563,12 @@ class MainWindow(QMainWindow):
         self._tts_button.setToolTip(f"Voz: {self._speech.name}")
         self._show_reading_position()
         self._update_status()
+
+    def _open_keys_dialog(self) -> None:
+        """Open the Azure key/region dialog, refresh voices after Save."""
+        dialog = AzureKeyDialog(self)
+        if dialog.exec() == AzureKeyDialog.DialogCode.Accepted:
+            self._refresh_voice_combo()
 
     # ------------------------------------------------------------------
     # Reading session (file persistence)

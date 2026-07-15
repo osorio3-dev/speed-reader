@@ -46,6 +46,9 @@ class ReadingController(QObject):
         self._settings = settings
         self._speech = speech
         self._speech.set_finished_callback(self._on_speech_finished)
+        self._audio_started = False
+        self._phrase_timer_started = False
+        self._install_audio_started_callback()
 
         # Word-advance timer (visual-only mode)
         self._timer = QTimer(self)
@@ -80,7 +83,14 @@ class ReadingController(QObject):
     def speech(self, backend: SpeechBackend) -> None:
         self._speech = backend
         self._speech.set_finished_callback(self._on_speech_finished)
+        self._install_audio_started_callback()
         self._apply_speech_rate()
+
+    def _install_audio_started_callback(self) -> None:
+        """Wire audio-started callback if the backend supports it."""
+        callback = getattr(self._speech, "set_audio_started_callback", None)
+        if callable(callback):
+            callback(self._on_audio_started)
 
     @property
     def playing(self) -> bool:
@@ -253,6 +263,7 @@ class ReadingController(QObject):
         self._speech.stop()
         self._speech = backend
         self._speech.set_finished_callback(self._on_speech_finished)
+        self._install_audio_started_callback()
         self._apply_speech_rate()
         self._emit_word()
         self._emit_progress()
@@ -270,8 +281,15 @@ class ReadingController(QObject):
     # ------------------------------------------------------------------
 
     def _uses_phrase_tts(self) -> bool:
-        """Return True when Piper handles multi-word phrases."""
-        return self._tts_enabled and self._speech.name.startswith("Piper")
+        """Return True when the backend handles multi-word phrases."""
+        if not self._tts_enabled:
+            return False
+        caps = getattr(self._speech, "capabilities", None)
+        if caps is not None:
+            return bool(getattr(caps, "phrase_sync", False))
+        # Backward compatibility for legacy backends without capabilities.
+        name = getattr(self._speech, "name", "") or ""
+        return name.startswith("Piper")
 
     def _apply_speech_rate(self) -> None:
         """Forward the current TTS WPM to the speech backend."""
@@ -323,10 +341,35 @@ class ReadingController(QObject):
             self._on_speech_finished()
             return
         self._phrase_word_offset = 0
+        self._phrase_timer_started = False
+        self._audio_started = False
         self._emit_word()
         self._apply_speech_rate()
+        # Timer is NOT started here — it is started in _on_audio_started so
+        # the visual cadence aligns with the moment the backend actually
+        # begins producing audio. For backends that do not signal audio
+        # start (or do so synchronously inside speak()), this still fires
+        # at least once via the fallback below.
         self._speech.speak(phrase)
-        self._phrase_timer.start(self._engine.interval_ms_at(self._engine.position))
+        if self._audio_started or not self._uses_phrase_tts():
+            self._start_phrase_timer()
+
+    def _start_phrase_timer(self) -> None:
+        if self._phrase_timer_started:
+            return
+        self._phrase_timer_started = True
+        self._phrase_timer.start(
+            self._engine.interval_ms_at(self._engine.position)
+        )
+
+    def _on_audio_started(self) -> None:
+        """Backend reports first audio byte; align the visual timer."""
+        self._audio_started = True
+        if not self._playing:
+            return
+        if not self._uses_phrase_tts():
+            return
+        self._start_phrase_timer()
 
     # --- Timer callbacks ---
 
@@ -358,6 +401,8 @@ class ReadingController(QObject):
         if not self._playing or not self._tts_enabled:
             return
         self._stop_phrase_visual_timer()
+        self._phrase_timer_started = False
+        self._audio_started = False
         if self._uses_phrase_tts():
             self._engine.advance_phrase()
         else:

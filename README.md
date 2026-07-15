@@ -130,6 +130,24 @@ Con **TTS** activo, la voz marca el ritmo. **RSVP** y **TTS** tienen sliders WPM
 
 Los bloques de código se omiten en TTS. El WPM controla la velocidad base.
 
+## Voces TTS
+
+Tres modos, en orden de calidad:
+
+| Modo | Comando | Setup | Calidad ES | Coste |
+|---|---|---|---|---|
+| Piper (offline, default si instalaste `--extra piper`) | `uv sync --extra piper` | descargar voz con `./scripts/download-voice.sh es_MX-ald-x_low` | buena | $0 |
+| Edge (online, sin key) | `uv sync --extra edge` | ninguno | excelente | $0 |
+| Azure (online, con key) | `uv sync --extra azure` | clic "Voces TTS" → key | excelente + SSML | $0 hasta 500k chars/mes |
+
+Para instalar todos los TTS a la vez (compatibilidad con instrucciones viejas):
+
+```bash
+uv sync --extra tts
+```
+
+Fallback automático: si un backend online falla, app vuelve a Piper o Qt sin ruido.
+
 ## Desarrollo
 
 ```bash

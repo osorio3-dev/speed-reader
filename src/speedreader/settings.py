@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -13,6 +14,13 @@ from speedreader.core.protocols import SettingsProtocol
 from speedreader.engine import DEFAULT_WPM
 from speedreader.profiles import DEFAULT_PROFILE_ID, normalize_profile_id, profile_label
 from speedreader.speech.voices import DEFAULT_PIPER_VOICE, QT_VOICE_ID
+
+logger = logging.getLogger(__name__)
+
+_KEYRING_SERVICE = "speedreader"
+_KEYRING_AZURE_KEY = "azure_key"
+_KEYRING_AZURE_REGION = "azure_region"
+_DEFAULT_AZURE_REGION = "eastus"
 
 # SettingsStore structurally conforms to SettingsProtocol via duck-typing.
 # All required load/save methods are defined below with matching signatures.
@@ -188,3 +196,66 @@ class SettingsStore:
         self._settings.remove(_SESSION_SOURCE_KIND_KEY)
         self._settings.remove(_SESSION_SOURCE_PATH_KEY)
         self._settings.remove(_SESSION_POSITION_KEY)
+
+
+# ---------------------------------------------------------------------------
+# Keyring helpers for secrets (Azure subscription key + region).
+# Never persist secrets in QSettings — they live in the OS keyring instead.
+# ---------------------------------------------------------------------------
+
+
+def get_azure_key() -> Optional[str]:
+    """Return the Azure subscription key from the OS keyring, or None."""
+    try:
+        import keyring
+    except ImportError:
+        return None
+    try:
+        return keyring.get_password(_KEYRING_SERVICE, _KEYRING_AZURE_KEY)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("Azure keyring read failed: %s", exc)
+        return None
+
+
+def set_azure_key(value: Optional[str]) -> None:
+    """Persist the Azure subscription key in the OS keyring (None deletes it)."""
+    import keyring
+
+    if value is None or value == "":
+        try:
+            keyring.delete_password(_KEYRING_SERVICE, _KEYRING_AZURE_KEY)
+        except keyring.errors.PasswordDeleteError:
+            pass
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("Azure keyring delete failed: %s", exc)
+        return
+    try:
+        keyring.set_password(_KEYRING_SERVICE, _KEYRING_AZURE_KEY, value)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("Azure keyring write failed: %s", exc)
+
+
+def get_azure_region() -> str:
+    """Return the Azure region from the OS keyring (default ``eastus``)."""
+    try:
+        import keyring
+    except ImportError:
+        return _DEFAULT_AZURE_REGION
+    try:
+        region = keyring.get_password(_KEYRING_SERVICE, _KEYRING_AZURE_REGION)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("Azure region read failed: %s", exc)
+        return _DEFAULT_AZURE_REGION
+    return region or _DEFAULT_AZURE_REGION
+
+
+def set_azure_region(value: str) -> None:
+    """Persist the Azure region in the OS keyring."""
+    import keyring
+
+    try:
+        keyring.set_password(
+            _KEYRING_SERVICE, _KEYRING_AZURE_REGION, value or _DEFAULT_AZURE_REGION
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("Azure region write failed: %s", exc)
