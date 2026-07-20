@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from speedreader.core.protocols import ClipboardProtocol
+from speedreader.core.rate import MAX_PITCH_PCT, MIN_PITCH_PCT
 from speedreader.engine import ReadingEngine
 from speedreader.importers.clipboard import ClipboardImporter
 from speedreader.importers.file import FileImporter, is_supported_file
@@ -182,6 +183,14 @@ class MainWindow(QMainWindow):
 
         self._tts_wpm_label = QLabel(self._format_tts_wpm_label())
 
+        self._tts_pitch_slider = QSlider(Qt.Orientation.Horizontal)
+        self._tts_pitch_slider.setRange(int(MIN_PITCH_PCT), int(MAX_PITCH_PCT))
+        self._tts_pitch_slider.setSingleStep(5)
+        self._tts_pitch_slider.setValue(self._tts_pitch)
+        self._tts_pitch_slider.valueChanged.connect(self._on_tts_pitch_changed)
+
+        self._tts_pitch_label = QLabel(f"Pitch {self._tts_pitch:+d}%")
+
         self._profile_combo = QComboBox()
         for profile in READING_PROFILES.values():
             self._profile_combo.addItem(profile.label, profile.id)
@@ -220,12 +229,16 @@ class MainWindow(QMainWindow):
         tts_wpm_row = QHBoxLayout()
         tts_wpm_row.addWidget(self._tts_wpm_label)
         tts_wpm_row.addWidget(self._tts_wpm_slider)
+        pitch_row = QHBoxLayout()
+        pitch_row.addWidget(self._tts_pitch_label)
+        pitch_row.addWidget(self._tts_pitch_slider)
         profile_row = QHBoxLayout()
         profile_row.addWidget(QLabel("Perfil"))
         profile_row.addWidget(self._profile_combo)
         tuning.addLayout(font_row)
         tuning.addLayout(wpm_row)
         tuning.addLayout(tts_wpm_row)
+        tuning.addLayout(pitch_row)
         tuning.addLayout(profile_row)
         controls.addLayout(tuning)
 
@@ -307,6 +320,14 @@ class MainWindow(QMainWindow):
         self._controller.tts_wpm = value
 
     @property
+    def _tts_pitch(self) -> int:
+        return self._controller.tts_pitch
+
+    @_tts_pitch.setter
+    def _tts_pitch(self, value: int) -> None:
+        self._controller.tts_pitch = value
+
+    @property
     def _source_path(self) -> str | None:
         if not hasattr(self, '_controller'):
             return None
@@ -357,7 +378,7 @@ class MainWindow(QMainWindow):
         return self._controller._uses_phrase_tts()  # type: ignore[return-value]
 
     def _apply_speech_rate(self) -> None:
-        self._controller._apply_speech_rate()  # type: ignore[return-value]
+        self._controller._apply_speech()  # type: ignore[return-value]
 
     # ------------------------------------------------------------------
     # View helpers
@@ -369,10 +390,21 @@ class MainWindow(QMainWindow):
     def _format_tts_wpm_label(self) -> str:
         return f"TTS {self._tts_wpm}"
 
+    def _format_tts_pitch_label(self) -> str:
+        return f"Pitch {self._tts_pitch:+d}%"
+
     def _sync_tts_controls(self) -> None:
         enabled = self._tts_enabled
         self._tts_wpm_slider.setEnabled(enabled)
         self._tts_wpm_label.setEnabled(enabled)
+
+        pitch_enabled = enabled and self._speech.capabilities.supports_pitch
+        self._tts_pitch_slider.setEnabled(pitch_enabled)
+        self._tts_pitch_label.setEnabled(pitch_enabled)
+        if pitch_enabled:
+            self._tts_pitch_label.setText(self._format_tts_pitch_label())
+        else:
+            self._tts_pitch_label.setText(f"Pitch — ({self._speech.name})")
 
     def _show_idle_message(self) -> None:
         self._set_plain_message(IDLE_MESSAGE)
@@ -465,6 +497,18 @@ class MainWindow(QMainWindow):
         self._controller.set_tts_wpm(value)
         self._tts_wpm_label.setText(self._format_tts_wpm_label())
         self._settings.save_tts_wpm(value)
+        self._update_status()
+
+    def _on_tts_pitch_changed(self, value: int) -> None:
+        self._controller.set_tts_pitch(value)
+        snapped = self._tts_pitch
+        if snapped != value:
+            self._tts_pitch_slider.blockSignals(True)
+            self._tts_pitch_slider.setValue(snapped)
+            self._tts_pitch_slider.blockSignals(False)
+            value = snapped
+        self._tts_pitch_label.setText(self._format_tts_pitch_label())
+        self._settings.save_tts_pitch(value)
         self._update_status()
 
     def _on_font_size_changed(self, value: int) -> None:
@@ -561,6 +605,7 @@ class MainWindow(QMainWindow):
         new_backend = self._create_speech_backend()
         self._controller.set_speech_backend(new_backend)
         self._tts_button.setToolTip(f"Voz: {self._speech.name}")
+        self._sync_tts_controls()
         self._show_reading_position()
         self._update_status()
 
@@ -770,6 +815,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         self._settings.save_wpm(self._engine.wpm)
         self._settings.save_tts_wpm(self._tts_wpm)
+        self._settings.save_tts_pitch(self._tts_pitch)
         self._settings.save_font_size(self._normal_word_point_size)
         self._settings.save_tts_enabled(self._tts_enabled)
         self._settings.save_tts_voice(self._selected_voice_id)

@@ -13,6 +13,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from speedreader.core.domain import SegmentKind, TextSegment
 from speedreader.core.engine import ReadingEngine
 from speedreader.core.orp import format_word_with_orp
+from speedreader.core.rate import clamp_pitch_pct
 from speedreader.core.speech import SpeechBackend
 from speedreader.settings import SettingsStore, snap_wpm
 
@@ -64,8 +65,10 @@ class ReadingController(QObject):
         self._source_path: Optional[str] = None
         self._source_kind: Optional[str] = None
         self._tts_wpm: int = settings.load_tts_wpm(engine.wpm)
+        self._tts_pitch: int = 0
+        self.tts_pitch = settings.load_tts_pitch()
         self._tts_enabled: bool = settings.load_tts_enabled()
-        self._apply_speech_rate()
+        self._apply_speech()
 
     # ------------------------------------------------------------------
     # Properties
@@ -84,7 +87,7 @@ class ReadingController(QObject):
         self._speech = backend
         self._speech.set_finished_callback(self._on_speech_finished)
         self._install_audio_started_callback()
-        self._apply_speech_rate()
+        self._apply_speech()
 
     def _install_audio_started_callback(self) -> None:
         """Wire audio-started callback if the backend supports it."""
@@ -105,6 +108,16 @@ class ReadingController(QObject):
         self._tts_wpm = snap_wpm(value)
 
     @property
+    def tts_pitch(self) -> int:
+        return self._tts_pitch
+
+    @tts_pitch.setter
+    def tts_pitch(self, value: int) -> None:
+        # Snap to nearest 5% step and clamp to [-50, +50]
+        clamped = clamp_pitch_pct(float(value))
+        self._tts_pitch = int(round(clamped / 5) * 5)
+
+    @property
     def tts_enabled(self) -> bool:
         return self._tts_enabled
 
@@ -116,7 +129,7 @@ class ReadingController(QObject):
             if self._playing and not self._engine.is_finished:
                 self._timer.start(self._engine.interval_ms())
         else:
-            self._apply_speech_rate()
+            self._apply_speech()
             if self._playing:
                 self._timer.stop()
                 self._speak_current()
@@ -240,7 +253,13 @@ class ReadingController(QObject):
     def set_tts_wpm(self, value: int) -> None:
         """Set TTS speech rate."""
         self._tts_wpm = snap_wpm(value)
-        self._apply_speech_rate()
+        self._apply_speech()
+        self._emit_progress()
+
+    def set_tts_pitch(self, value: int) -> None:
+        """Set TTS relative pitch."""
+        self.tts_pitch = value  # property setter does the snap + clamp
+        self._apply_speech()
         self._emit_progress()
 
     def set_profile(self, profile_id: str) -> None:
@@ -248,7 +267,7 @@ class ReadingController(QObject):
         if profile_id == self._engine.profile_id:
             return
         self._engine.set_profile(profile_id)
-        self._apply_speech_rate()
+        self._apply_speech()
         if self._playing and self._tts_enabled:
             self._phrase_timer.setInterval(
                 self._engine.interval_ms_at(self._engine.position)
@@ -264,7 +283,7 @@ class ReadingController(QObject):
         self._speech = backend
         self._speech.set_finished_callback(self._on_speech_finished)
         self._install_audio_started_callback()
-        self._apply_speech_rate()
+        self._apply_speech()
         self._emit_word()
         self._emit_progress()
         if was_playing and self._tts_enabled and not self._engine.is_finished:
@@ -291,12 +310,13 @@ class ReadingController(QObject):
         name = getattr(self._speech, "name", "") or ""
         return name.startswith("Piper")
 
-    def _apply_speech_rate(self) -> None:
-        """Forward the current TTS WPM to the speech backend."""
+    def _apply_speech(self) -> None:
+        """Forward the current TTS rate and pitch to the speech backend."""
         self._speech.set_rate_from_wpm(
             self._tts_wpm,
             self._engine.speech_pace_multiplier(),
         )
+        self._speech.set_pitch_from_pct(self._tts_pitch)
 
     def _should_skip_tts_for_current_unit(self) -> bool:
         return self._engine.current_segment_kind == SegmentKind.CODE_BLOCK
@@ -324,7 +344,7 @@ class ReadingController(QObject):
         if not word:
             self._on_speech_finished()
             return
-        self._apply_speech_rate()
+        self._apply_speech()
         self._speech.speak(word)
 
     def _speak_current_phrase(self) -> None:
@@ -344,7 +364,7 @@ class ReadingController(QObject):
         self._phrase_timer_started = False
         self._audio_started = False
         self._emit_word()
-        self._apply_speech_rate()
+        self._apply_speech()
         # Timer is NOT started here — it is started in _on_audio_started so
         # the visual cadence aligns with the moment the backend actually
         # begins producing audio. For backends that do not signal audio

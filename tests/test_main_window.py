@@ -12,9 +12,27 @@ class _FakeSpeech:
     def __init__(self, name: str) -> None:
         self.name = name
         self.rate_calls: list[tuple[int, float]] = []
+        self._pitch_pct: float = 0.0
+
+    @property
+    def capabilities(self):
+        from speedreader.core.speech import SpeechCapabilities
+
+        # Mirror real backend behaviour: Piper advertises phrase_sync.
+        return SpeechCapabilities(
+            phrase_sync=self.name.startswith("Piper"),
+            supports_pitch=True,
+        )
+
+    @property
+    def pitch_pct(self) -> float:
+        return self._pitch_pct
 
     def set_rate_from_wpm(self, wpm: int, pace_multiplier: float = 1.0) -> None:
         self.rate_calls.append((wpm, pace_multiplier))
+
+    def set_pitch_from_pct(self, pct: float) -> None:
+        self._pitch_pct = pct
 
     def set_finished_callback(self, callback) -> None:
         self._callback = callback

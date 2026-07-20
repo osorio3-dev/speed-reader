@@ -6,9 +6,7 @@ region from ``azure_region`` (default ``eastus``).
 
 V1 trade-offs
 -------------
-- Rate control is delegated to the Azure SDK; ``set_rate_from_wpm`` is a
-  no-op because Azure prosody control requires SSML ``<prosody>`` which v1
-  does not emit.
+- Rate and pitch controls are emitted through an SSML ``<prosody>`` element.
 - A 1000-character per-call cap is enforced by splitting on sentence
   boundaries; long inputs are concatenated sequentially without joining
   audio.
@@ -23,6 +21,7 @@ from typing import Callable, Optional
 
 from PySide6.QtCore import QObject, Signal, Slot
 
+from speedreader.core.rate import clamp_pitch_pct
 from speedreader.core.speech import SpeechBackend, SpeechCapabilities
 from speedreader.settings import get_azure_key
 
@@ -102,6 +101,9 @@ class AzureTtsBackend(QObject):
         self._key = subscription_key
         self._finished_callback: Optional[Callable[[], None]] = None
         self._audio_started_callback: Optional[Callable[[], None]] = None
+        self._tts_wpm: int = 400
+        self._pitch_pct: float = 0.0
+        self._rate_pct: float = 0.0
 
         import azure.cognitiveservices.speech as speechsdk  # type: ignore
 
@@ -133,11 +135,20 @@ class AzureTtsBackend(QObject):
             streaming=True,
             needs_key=True,
             max_chars_per_speak=_MAX_CHARS,
+            supports_pitch=True,
         )
 
+    @property
+    def pitch_pct(self) -> float:
+        return self._pitch_pct
+
     def set_rate_from_wpm(self, wpm: int, pace_multiplier: float = 1.0) -> None:
-        # SSML prosody is out of scope for v1; documented above.
-        return None
+        self._tts_wpm = wpm
+        effective_wpm = self._tts_wpm / max(pace_multiplier, 0.1)
+        self._rate_pct = max(-50.0, min(100.0, (effective_wpm - 400) / 4))
+
+    def set_pitch_from_pct(self, pct: float) -> None:
+        self._pitch_pct = clamp_pitch_pct(pct)
 
     def set_finished_callback(self, callback: Optional[Callable[[], None]]) -> None:
         self._finished_callback = callback
@@ -177,10 +188,14 @@ class AzureTtsBackend(QObject):
             self._synthesis_done.emit()
             return
         chunk = self._pending_chunks.pop(0)
+        rate_pct_str = f"{int(self._rate_pct):+d}%"
+        pitch_pct_str = f"{int(self._pitch_pct):+d}%"
         ssml = (
             f'<speak version="1.0" xml:lang="{self._lang}">'
             f'<voice name="{_xml_escape(self._voice_id)}">'
+            f'<prosody rate="{rate_pct_str}" pitch="{pitch_pct_str}">'
             f"{_xml_escape(chunk)}"
+            "</prosody>"
             "</voice>"
             "</speak>"
         )

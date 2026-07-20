@@ -2,6 +2,12 @@
 
 DEFAULT_BASE_WPM = 300
 MIN_PIPER_LENGTH_SCALE = 0.15
+MIN_PITCH_PCT = -50.0
+MAX_PITCH_PCT = 50.0
+
+
+def clamp_pitch_pct(value: float) -> float:
+    return max(MIN_PITCH_PCT, min(MAX_PITCH_PCT, value))
 
 
 def wpm_to_qt_rate(

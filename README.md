@@ -128,6 +128,13 @@ sudo apt install speech-dispatcher espeak-ng
 
 Con **TTS** activo, la voz marca el ritmo. **RSVP** y **TTS** tienen sliders WPM independientes (100–1500, saltos de 25). Con **Piper** se lee frase a frase con RSVP sincronizado; con Qt/eSpeak, palabra a palabra.
 
+Cada voz tiene dos sliders cuando TTS está activo:
+
+- **TTS WPM**: 100–1500, default 400. Acelera el ritmo (todos los backends).
+- **Pitch**: -50% a +50%, default 0%. Sube/baja el tono sin acelerar. Lo soportan Qt, Edge y Azure. Piper no soporta pitch — el slider se desactiva automáticamente.
+
+Piper y Edge no soportan exactamente el mismo rango de pitch: Edge usa Hz (±50%), Azure usa % (±50%), Qt usa un factor [-1, 1]. El slider los normaliza visualmente.
+
 Los bloques de código se omiten en TTS. El WPM controla la velocidad base.
 
 ## Voces TTS

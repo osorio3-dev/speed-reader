@@ -82,6 +82,22 @@ class JsonSettingsStore:
         self._data["tts_wpm"] = wpm
         self._save()
 
+    def load_tts_pitch(self, default: int | None = None) -> int:
+        fallback = default if default is not None else 0
+        raw = self._data.get("tts_pitch", fallback)
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return fallback
+        # Clamp to [-50, +50] to defend against manual config edits / future format changes
+        from speedreader.core.rate import clamp_pitch_pct
+
+        return int(clamp_pitch_pct(float(value)))
+
+    def save_tts_pitch(self, pitch: int) -> None:
+        self._data["tts_pitch"] = int(pitch)
+        self._save()
+
     # ------------------------------------------------------------------
     # SettingsProtocol — font size
     # ------------------------------------------------------------------

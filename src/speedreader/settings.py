@@ -33,6 +33,7 @@ MIN_FONT_SIZE = 24
 MAX_FONT_SIZE = 96
 _WPM_KEY = "wpm"
 _TTS_WPM_KEY = "tts/wpm"
+_TTS_PITCH_KEY = "tts_pitch"
 _FONT_SIZE_KEY = "font_size"
 _SESSION_SOURCE_KIND_KEY = "session/source_kind"
 _SESSION_SOURCE_PATH_KEY = "session/source_path"
@@ -104,6 +105,23 @@ class SettingsStore:
     def save_tts_wpm(self, wpm: int) -> None:
         """Persist the TTS speaking WPM."""
         self._settings.setValue(_TTS_WPM_KEY, clamp_wpm(wpm))
+
+    def load_tts_pitch(self, default: Optional[int] = None) -> int:
+        """Return the saved TTS pitch or ``default``."""
+        fallback = default if default is not None else 0
+        raw = self._settings.value(_TTS_PITCH_KEY, fallback)
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return fallback
+        # Clamp to [-50, +50] to defend against manual config edits / future format changes
+        from speedreader.core.rate import clamp_pitch_pct
+
+        return int(clamp_pitch_pct(float(value)))
+
+    def save_tts_pitch(self, pitch: int) -> None:
+        """Persist the TTS pitch percentage."""
+        self._settings.setValue(_TTS_PITCH_KEY, int(pitch))
 
     def load_font_size(self, default: int = DEFAULT_FONT_SIZE) -> int:
         """Return the saved RSVP font size or ``default``."""

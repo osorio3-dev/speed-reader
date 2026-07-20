@@ -51,6 +51,33 @@ def test_save_load_round_trip(tmp_path: Path) -> None:
     assert store.load_reading_profile() == "fast"
 
 
+def test_save_load_tts_pitch_round_trip(tmp_path: Path) -> None:
+    """JsonSettingsStore persists TTS pitch values."""
+    from speedreader.cli.settings import JsonSettingsStore
+
+    store = JsonSettingsStore(path=tmp_path / "settings.json")
+    store.save_tts_pitch(20)
+    assert store.load_tts_pitch() == 20
+
+
+def test_load_tts_pitch_clamps_out_of_range(tmp_path: Path) -> None:
+    """JsonSettingsStore clamps manually edited TTS pitch values."""
+    from speedreader.cli.settings import JsonSettingsStore
+
+    store = JsonSettingsStore(path=tmp_path / "settings.json")
+    store._data["tts_pitch"] = 200
+    assert store.load_tts_pitch() == 50
+
+
+def test_load_tts_pitch_handles_malformed(tmp_path: Path) -> None:
+    """JsonSettingsStore falls back for malformed TTS pitch values."""
+    from speedreader.cli.settings import JsonSettingsStore
+
+    store = JsonSettingsStore(path=tmp_path / "settings.json")
+    store._data["tts_pitch"] = "not-a-number"
+    assert store.load_tts_pitch() == 0
+
+
 def test_persistence_across_instances(tmp_path: Path) -> None:
     """Data written by one instance is readable by a new instance."""
     from speedreader.cli.settings import JsonSettingsStore

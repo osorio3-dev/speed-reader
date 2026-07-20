@@ -7,6 +7,7 @@ from typing import Callable, Optional
 from PySide6.QtCore import QObject
 from PySide6.QtTextToSpeech import QTextToSpeech
 
+from speedreader.core.rate import clamp_pitch_pct
 from speedreader.core.speech import SpeechCapabilities
 from speedreader.speech.rate import wpm_to_qt_rate
 
@@ -19,6 +20,7 @@ class QtSpeechBackend(QObject):
         self._tts = QTextToSpeech()
         self._finished_callback: Optional[Callable[[], None]] = None
         self._audio_started_callback: Optional[Callable[[], None]] = None
+        self._pitch_pct: float = 0.0
         self._was_speaking = False
         self._announced_start = False
         self._tts.stateChanged.connect(self._on_state_changed)
@@ -35,10 +37,19 @@ class QtSpeechBackend(QObject):
             streaming=False,
             needs_key=False,
             max_chars_per_speak=None,
+            supports_pitch=True,
         )
+
+    @property
+    def pitch_pct(self) -> float:
+        return self._pitch_pct
 
     def set_rate_from_wpm(self, wpm: int, pace_multiplier: float = 1.0) -> None:
         self._tts.setRate(wpm_to_qt_rate(wpm, pace_multiplier=pace_multiplier))
+
+    def set_pitch_from_pct(self, pct: float) -> None:
+        self._pitch_pct = clamp_pitch_pct(pct)
+        self._tts.setPitch(self._pitch_pct / 50.0)
 
     def set_finished_callback(self, callback: Optional[Callable[[], None]]) -> None:
         self._finished_callback = callback

@@ -111,6 +111,33 @@ def test_settings_store_roundtrips_tts_wpm(tmp_path) -> None:
     assert store.load_tts_wpm() == 1500
 
 
+def test_save_load_tts_pitch_round_trip(tmp_path) -> None:
+    ini_path = tmp_path / "speedreader.ini"
+    settings = QSettings(str(ini_path), QSettings.Format.IniFormat)
+    store = SettingsStore(settings)
+
+    store.save_tts_pitch(20)
+    assert store.load_tts_pitch() == 20
+
+
+def test_load_tts_pitch_clamps_out_of_range(tmp_path) -> None:
+    ini_path = tmp_path / "speedreader.ini"
+    settings = QSettings(str(ini_path), QSettings.Format.IniFormat)
+    store = SettingsStore(settings)
+    settings.setValue("tts_pitch", 200)
+
+    assert store.load_tts_pitch() == 50
+
+
+def test_load_tts_pitch_handles_malformed(tmp_path) -> None:
+    ini_path = tmp_path / "speedreader.ini"
+    settings = QSettings(str(ini_path), QSettings.Format.IniFormat)
+    store = SettingsStore(settings)
+    settings.setValue("tts_pitch", "not-a-number")
+
+    assert store.load_tts_pitch() == 0
+
+
 def test_settings_store_roundtrips_reading_profile(tmp_path) -> None:
     ini_path = tmp_path / "speedreader.ini"
     settings = QSettings(str(ini_path), QSettings.Format.IniFormat)

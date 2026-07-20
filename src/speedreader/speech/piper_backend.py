@@ -15,6 +15,7 @@ PiperWorker(QObject)
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 from typing import Callable, Optional
@@ -31,9 +32,12 @@ from PySide6.QtCore import (
 )
 from PySide6.QtMultimedia import QAudio, QAudioFormat, QAudioSink, QMediaDevices
 
+from speedreader.core.rate import clamp_pitch_pct
 from speedreader.core.speech import SpeechCapabilities
 from speedreader.speech.rate import wpm_to_length_scale
 from speedreader.speech.voices import resolve_piper_model
+
+logger = logging.getLogger(__name__)
 
 
 def find_voice_model(voices_dir: Path, voice_id: str | None = None) -> Optional[Path]:
@@ -120,6 +124,7 @@ class PiperSpeechBackend(QObject):
         self._finished_callback: Optional[Callable[[], None]] = None
         self._audio_started_callback: Optional[Callable[[], None]] = None
         self._length_scale = 1.0
+        self._pitch_pct: float = 0.0
         self._audio_sink: Optional[QAudioSink] = None
         self._audio_buffer: Optional[QBuffer] = None
         # Generation counter (main thread only) – every speak/stop bumps it
@@ -155,10 +160,19 @@ class PiperSpeechBackend(QObject):
             streaming=True,
             needs_key=False,
             max_chars_per_speak=None,
+            supports_pitch=False,
         )
+
+    @property
+    def pitch_pct(self) -> float:
+        return self._pitch_pct
 
     def set_rate_from_wpm(self, wpm: int, pace_multiplier: float = 1.0) -> None:
         self._length_scale = wpm_to_length_scale(wpm, pace_multiplier=pace_multiplier)
+
+    def set_pitch_from_pct(self, pct: float) -> None:
+        self._pitch_pct = clamp_pitch_pct(pct)
+        logger.debug("Piper ignores pitch setting: %s%%", self._pitch_pct)
 
     def set_finished_callback(self, callback: Optional[Callable[[], None]]) -> None:
         self._finished_callback = callback

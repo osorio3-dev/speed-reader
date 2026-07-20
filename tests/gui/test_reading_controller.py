@@ -20,9 +20,17 @@ class _FakeSpeech:
         self.last_text: str | None = None
         self._callback = None
         self._stopped = False
+        self._pitch_pct: float = 0.0
+
+    @property
+    def pitch_pct(self) -> float:
+        return self._pitch_pct
 
     def set_rate_from_wpm(self, wpm: int, pace_multiplier: float = 1.0) -> None:
         self.rate_calls.append((wpm, pace_multiplier))
+
+    def set_pitch_from_pct(self, pct: float) -> None:
+        self._pitch_pct = pct
 
     def set_finished_callback(self, callback) -> None:
         self._callback = callback
@@ -60,6 +68,12 @@ class _FakeSettings:
 
     def save_tts_wpm(self, wpm: int) -> None:
         self._tts_wpm = wpm
+
+    def load_tts_pitch(self, default: int | None = None) -> int:
+        return default if default is not None else 0
+
+    def save_tts_pitch(self, pitch: int) -> None:
+        pass
 
     def load_font_size(self, default: int = 42) -> int:
         return self._font_size

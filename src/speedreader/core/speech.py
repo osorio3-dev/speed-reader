@@ -19,12 +19,15 @@ class SpeechCapabilities:
         Backend requires API key configuration (Azure).
     max_chars_per_speak
         Optional character cap per speak() call. ``None`` for unlimited.
+    supports_pitch
+        Backend can shift pitch for the next utterance.
     """
 
     phrase_sync: bool = False
     streaming: bool = False
     needs_key: bool = False
     max_chars_per_speak: Optional[int] = None
+    supports_pitch: bool = False
 
 
 class SpeechBackend(Protocol):
@@ -43,6 +46,13 @@ class SpeechBackend(Protocol):
 
     def set_rate_from_wpm(self, wpm: int, pace_multiplier: float = 1.0) -> None:
         """Configure speaking speed from the reader WPM slider."""
+
+    def set_pitch_from_pct(self, pitch_pct: float) -> None:
+        """Configure relative pitch (-50..+50 %) for the next utterance."""
+
+    @property
+    def pitch_pct(self) -> float:
+        """Current pitch setting, -50..+50."""
 
     def set_finished_callback(self, callback: Optional[Callable[[], None]]) -> None:
         """Register a callback invoked after each utterance finishes."""

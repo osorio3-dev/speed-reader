@@ -9,9 +9,7 @@ V1 trade-offs
 - Playback uses ``QMediaPlayer`` + ``QAudioOutput`` with a temporary MP3 file
   (``QSoundEffect`` cannot play from in-memory byte buffers). The temp file is
   deleted after playback completes.
-- ``set_rate_from_wpm`` is a no-op: Edge voices do not expose a rate control
-  in the free endpoint. WPM remains adjustable but maps to playback duration
-  rather than the synthesizer rate.
+- ``set_rate_from_wpm`` maps the reader speed to Edge's relative SSML rate.
 """
 
 from __future__ import annotations
@@ -24,6 +22,7 @@ from typing import Callable, Optional
 from PySide6.QtCore import QObject, QUrl, Signal, Slot
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 
+from speedreader.core.rate import clamp_pitch_pct
 from speedreader.core.speech import SpeechBackend, SpeechCapabilities
 
 logger = logging.getLogger(__name__)
@@ -46,6 +45,8 @@ class EdgeTtsBackend(QObject):
         self._voice_id = voice_id
         self._finished_callback: Optional[Callable[[], None]] = None
         self._audio_started_callback: Optional[Callable[[], None]] = None
+        self._pitch_pct: float = 0.0
+        self._rate_pct: float = 0.0
 
         # Lazily import edge-tts so the module loads even when offline.
         import edge_tts  # noqa: F401  (kept for import-side-effect detection)
@@ -71,13 +72,19 @@ class EdgeTtsBackend(QObject):
             streaming=True,
             needs_key=False,
             max_chars_per_speak=2000,
+            supports_pitch=True,
         )
 
+    @property
+    def pitch_pct(self) -> float:
+        return self._pitch_pct
+
     def set_rate_from_wpm(self, wpm: int, pace_multiplier: float = 1.0) -> None:
-        # Edge TTS has no rate control in the public endpoint. Intentionally a
-        # no-op so the WPM slider still feels responsive to the user but does
-        # not affect synthesis speed.
-        return None
+        effective_wpm = wpm / max(pace_multiplier, 0.1)
+        self._rate_pct = max(-100.0, min(200.0, (effective_wpm - 400) / 4))
+
+    def set_pitch_from_pct(self, pct: float) -> None:
+        self._pitch_pct = clamp_pitch_pct(pct)
 
     def set_finished_callback(self, callback: Optional[Callable[[], None]]) -> None:
         self._finished_callback = callback
@@ -104,7 +111,12 @@ class EdgeTtsBackend(QObject):
 
             async def _collect() -> bytes:
                 buf = bytearray()
-                comm = Communicate(cleaned, voice=self._voice_id)
+                options: dict[str, str] = {"voice": self._voice_id}
+                if self._rate_pct != 0:
+                    options["rate"] = f"{int(self._rate_pct):+d}%"
+                if self._pitch_pct != 0:
+                    options["pitch"] = f"{int(self._pitch_pct * 2):+d}Hz"
+                comm = Communicate(cleaned, **options)
                 async for chunk in comm.stream():
                     if self._cancelled:
                         break
